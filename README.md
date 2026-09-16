@@ -46,42 +46,38 @@ A complete walkthrough from par/tim to a timing corner plot is in
 
 ## Install
 
-This repository is public (`Vela-pulsar/vela-jax`). Most of the stack around
-it is still unreleased work on branches. PyPI releases will not reproduce
-anything below.
+This repository is public (`Vela-pulsar/vela-jax`). Tag `v0.1.0` is the
+first freeze. PINT-hosted ingest uses released `pint-pulsar`. Discovery
+Transport and tempo2 ingest are still git branches.
 
 ```bash
-pip install -e .                       # engine + PINT as the timing package; pulls psrdata
+pip install -e .                       # engine + PINT as the timing package; pulls psrdata@v0.1.0
 pip install -e '.[dev,oracle,tempo2]'  # everything the test tiers need
 ```
 
-Every other package is installed from a checkout with `--no-deps`, so that pip
-does not replace a required branch with a release:
-
-| Package | Repository | Branch | Needed for |
+| Package | Repository | Pin | Needed for |
 |---|---|---|---|
-| **vela-jax** | `Vela-pulsar/vela-jax` | `main` | this package |
-| **psrdata** | `nanograv/psrdata` | `main` | the pulsar record and feather schema; a declared dependency, pip installs it |
-| **PINT** | `vhaasteren/PINT` | `metapulsar` | the default timing package: FDJUMPDM sign fix, a longdouble fix, Jodrell MkII clock chains |
-| libstempo | `vhaasteren/libstempo` | `feat/vela-jax` | the tempo2 timing package (`Engine.from_tempo2`): exposes `siteVel`, `correction_tt`, `correction_tt_tb` |
+| **vela-jax** | `Vela-pulsar/vela-jax` | `v0.1.0` | this package |
+| **psrdata** | `nanograv/psrdata` | `v0.1.0` | the pulsar record and feather schema; a declared dependency, pip installs it |
+| **PINT** | PyPI `pint-pulsar` | `>=1.1.7` | the default timing package. Hybrid `PB+FBn` / signed-H3 DDH still need [nanograv/PINT#2023](https://github.com/nanograv/PINT/pull/2023) |
+| libstempo | PyPI `2.5.1` / `vhaasteren/libstempo@feat/vela-jax` | tempo2 host only | `Engine.from_tempo2` needs `siteVel`, `correction_tt`, `correction_tt_tb` (not in 2.5.1) |
 | tempo2 | | | the C library and `$TEMPO2` runtime, for a tempo2 read |
-| nltiming | `vhaasteren/nltiming` | `main` | sampling timing parameters: `TimingSpec`, priors, charts, the samplers |
-| Discovery | `vhaasteren/discovery` | `feat/class-tracking` | the NUTS path: `transport.class_tracking` and the `origin=` keyword |
-| MetaPulsar | `vhaasteren/metapulsar` | `main` | several PTA datasets in one timing model, one vela-jax leg per PTA |
+| nltiming | `vhaasteren/nltiming` | `v0.1.0` | sampling timing parameters: `TimingSpec`, priors, charts, the samplers |
+| Discovery | `vhaasteren/discovery` | `feat/class-tracking` | the NUTS path: `transport.class_tracking` and the `origin=` keyword. Not in Discovery 0.5.1 |
+| MetaPulsar | `vhaasteren/metapulsar` | `main` | several PTA datasets in one timing model, one vela-jax leg per PTA. PyPI `0.9.6` is the older combination-only line |
 | Vela.jl | `Vela-pulsar/Vela.jl` | `main` | tests only: `pyvela` as the parity oracle, and the fixture par/tim files |
 
 ```bash
-git clone -b metapulsar          git@github.com:vhaasteren/PINT.git
+pip install 'pint-pulsar>=1.1.7'
 git clone -b feat/vela-jax       git@github.com:vhaasteren/libstempo.git   # tempo2 timing package only
 git clone -b feat/class-tracking git@github.com:vhaasteren/discovery.git
-git clone                        git@github.com:vhaasteren/nltiming.git
+git clone -b v0.1.0              git@github.com:vhaasteren/nltiming.git
 git clone                        git@github.com:vhaasteren/metapulsar.git
-pip install -e PINT -e discovery -e nltiming -e metapulsar --no-deps
+pip install -e discovery -e nltiming -e metapulsar --no-deps
 pip install -e libstempo                                     # needs tempo2 headers and libs
 ```
 
-`psrdata` is pinned to a moving `main`; pin a commit for a reproducible
-environment. Discovery's decentering chart lives on its metamath kernel path,
+Discovery's decentering chart lives on its metamath kernel path,
 so call `ds.config(kernels="metamath")` before building a model.
 
 A stock libstempo fails loudly on a tempo2 read, by design:

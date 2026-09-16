@@ -13,13 +13,13 @@ dynamic = ["version"]
 dependencies = [
     "numpy>=1.24",
     "jax>=0.4.30",
-    "pint-pulsar>=1.0",
+    "pint-pulsar>=1.1.7",
     "astropy>=5.3",
     # The pulsar record, the feather schema and the pure par-text rules. It
     # pulls in pyarrow and nothing else; the record type is shared with
     # MetaPulsar and nltiming so a feather written here is not this package's
     # private format.
-    "psrdata @ git+https://github.com/nanograv/psrdata.git@main",
+    "psrdata @ git+https://github.com/nanograv/psrdata.git@v0.1.0",
 ]
 
 [project.optional-dependencies]
