@@ -34,14 +34,27 @@ def evaluate_proper_motion(long0, lat0, pm_long, pm_lat, dt) -> vm.Vec3:
 def ecliptic_to_equatorial(lhat: vm.Vec3, obliquity: float) -> vm.Vec3:
     """Rotate an ecliptic line of sight into ICRS.
 
-    ``obliquity`` is resolved at build time from the par's ``ECL`` keyword
-    (:func:`vela_jax.constants.obliquity_radians`), or from the timing
-    package's own constant where it has already rotated its vectors with one.
-    Vela hard-codes IERS2010 here; see the note on ``constants.OBL``.
+    Vela ``ecliptic_to_icrs``. ``obliquity`` is resolved at build time from
+    the par's ``ECL`` keyword (:func:`vela_jax.constants.obliquity_radians`),
+    or from the timing package's own constant where it has already rotated
+    its vectors with one. Vela hard-codes IERS2010 here; see the note on
+    ``constants.OBL``.
     """
     sin_e, cos_e = vm.sin(obliquity), vm.cos(obliquity)
     x, y, z = lhat
     return (x, cos_e * y - sin_e * z, sin_e * y + cos_e * z)
+
+
+def equatorial_to_ecliptic(vec: vm.Vec3, obliquity: float) -> vm.Vec3:
+    """Rotate an ICRS vector into the ecliptic frame of ``ecliptic_to_equatorial``.
+
+    Vela ``icrs_to_ecliptic``. DDK annual-parallax ``I0``/``J0`` must live in
+    the same sky frame as ``KOM``; for an ecliptic model that is this frame,
+    not ICRS.
+    """
+    sin_e, cos_e = vm.sin(obliquity), vm.cos(obliquity)
+    x, y, z = vec
+    return (x, cos_e * y + sin_e * z, -sin_e * y + cos_e * z)
 
 
 def shapiro_delay(mass, obs_obj_pos: vm.Vec3, lhat: vm.Vec3):

@@ -324,6 +324,13 @@ harmonics, not the Roemer truncation.
 **DDK `K96`.** Vela's behaviour (always apply the PM terms). `K96 N`
 raises rather than silently doing something else.
 
+**DDK ecliptic annual parallax.** Vela.jl's `fix/ddk`: `ssb_psr_pos` is
+ICRS, `KOM` is ecliptic, so `I0`/`J0` must be built after rotating both
+the pulsar and observer vectors with the inverse of `solar_system`'s
+obliquity rotation. The PM terms were already ecliptic. `sim_ddk` is
+equatorial and does not catch this; the gate is ICRS vs `as_ECL()` on
+that fixture (Vela `test_ddk_ecliptic.py`).
+
 **Live epochs.** `T0` and `TASC` are free and gated against pyvela,
 including the interaction with the orbit-count reduction.
 `POSEPOCH` / `DMEPOCH` are refused because nothing in the chain needs
