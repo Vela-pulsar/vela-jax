@@ -60,7 +60,7 @@ does not replace a required branch with a release:
 | Package | Repository | Branch | Needed for |
 |---|---|---|---|
 | **vela-jax** | `vhaasteren/vela-jax` (private) | `main` | this package |
-| **psrdata** | `vhaasteren/psrdata` | `main` | the pulsar record and feather schema; a declared dependency, pip installs it |
+| **psrdata** | `nanograv/psrdata` | `main` | the pulsar record and feather schema; a declared dependency, pip installs it |
 | **PINT** | `vhaasteren/PINT` | `metapulsar` | the default timing package: FDJUMPDM sign fix, a longdouble fix, Jodrell MkII clock chains |
 | libstempo | `vhaasteren/libstempo` | `feat/vela-jax` | the tempo2 timing package (`Engine.from_tempo2`): exposes `siteVel`, `correction_tt`, `correction_tt_tb` |
 | tempo2 | | | the C library and `$TEMPO2` runtime, for a tempo2 read |

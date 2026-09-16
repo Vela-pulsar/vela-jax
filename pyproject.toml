@@ -19,7 +19,7 @@ dependencies = [
     # pulls in pyarrow and nothing else; the record type is shared with
     # MetaPulsar and nltiming so a feather written here is not this package's
     # private format.
-    "psrdata @ git+https://github.com/vhaasteren/psrdata.git@main",
+    "psrdata @ git+https://github.com/nanograv/psrdata.git@main",
 ]
 
 [project.optional-dependencies]
