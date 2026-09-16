@@ -46,8 +46,9 @@ A complete walkthrough from par/tim to a timing corner plot is in
 
 ## Install
 
-This repository is private, and most of the stack around it is unreleased
-work on branches. PyPI releases will not reproduce anything below.
+This repository is public (`Vela-pulsar/vela-jax`). Most of the stack around
+it is still unreleased work on branches. PyPI releases will not reproduce
+anything below.
 
 ```bash
 pip install -e .                       # engine + PINT as the timing package; pulls psrdata
@@ -59,7 +60,7 @@ does not replace a required branch with a release:
 
 | Package | Repository | Branch | Needed for |
 |---|---|---|---|
-| **vela-jax** | `vhaasteren/vela-jax` (private) | `main` | this package |
+| **vela-jax** | `Vela-pulsar/vela-jax` | `main` | this package |
 | **psrdata** | `nanograv/psrdata` | `main` | the pulsar record and feather schema; a declared dependency, pip installs it |
 | **PINT** | `vhaasteren/PINT` | `metapulsar` | the default timing package: FDJUMPDM sign fix, a longdouble fix, Jodrell MkII clock chains |
 | libstempo | `vhaasteren/libstempo` | `feat/vela-jax` | the tempo2 timing package (`Engine.from_tempo2`): exposes `siteVel`, `correction_tt`, `correction_tt_tb` |
@@ -67,7 +68,7 @@ does not replace a required branch with a release:
 | nltiming | `vhaasteren/nltiming` | `main` | sampling timing parameters: `TimingSpec`, priors, charts, the samplers |
 | Discovery | `vhaasteren/discovery` | `feat/class-tracking` | the NUTS path: `transport.class_tracking` and the `origin=` keyword |
 | MetaPulsar | `vhaasteren/metapulsar` | `main` | several PTA datasets in one timing model, one vela-jax leg per PTA |
-| Vela.jl | `vhaasteren/Vela.jl` | `vela-jax` | tests only: `pyvela` as the parity oracle, and the fixture par/tim files |
+| Vela.jl | `Vela-pulsar/Vela.jl` | `main` | tests only: `pyvela` as the parity oracle, and the fixture par/tim files |
 
 ```bash
 git clone -b metapulsar          git@github.com:vhaasteren/PINT.git
@@ -420,7 +421,7 @@ examples/            sampling_timing_parameters.ipynb  nuts_j1853.py  nuts_fp32.
 ## License
 
 GPL-3.0-or-later, see [LICENSE](LICENSE). vela-jax is a translation of GPL-3
-Vela.jl code; this is the license its author requested.
+Vela.jl code.
 
 ## Citing
 
