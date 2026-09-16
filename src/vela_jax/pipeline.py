@@ -112,19 +112,20 @@ def build_chain(
 
     ecliptic = "AstrometryEcliptic" in components
     has_astrometry = ecliptic or "AstrometryEquatorial" in components
+    # The obliquity is the par's ``ECL`` unless the timing package has
+    # already rotated its own vectors with a different one (Addendum A:
+    # tempo2 does, and ignores ``ECL``). Resolved here, never in the trace.
+    # DDK annual-parallax uses the same value so I0/J0 live in KOM's frame.
+    resolved = (
+        obliquity_radians(model["ECL"].value)
+        if obliquity is None and "ECL" in model
+        else (OBL if obliquity is None else obliquity)
+    )
     if has_astrometry:
         # A par with no astrometry at all is a bare rotator: pyvela adds no
         # SolarSystem component either, and every TOA is treated as barycentred.
         planet_shapiro = bool(
             "PLANET_SHAPIRO" in model and model["PLANET_SHAPIRO"].value
-        )
-        # The obliquity is the par's ``ECL`` unless the timing package has
-        # already rotated its own vectors with a different one (Addendum A:
-        # tempo2 does, and ignores ``ECL``). Resolved here, never in the trace.
-        resolved = (
-            obliquity_radians(model["ECL"].value)
-            if obliquity is None and "ECL" in model
-            else (OBL if obliquity is None else obliquity)
         )
         stages["solar_system"] = (
             "solar_system",
@@ -166,6 +167,7 @@ def build_chain(
                 use_fbx=use_fbx,
                 ecliptic=ecliptic,
                 ell1_t2=conventions == "tempo2",
+                obliquity=resolved,
             ),
         )
         consumed |= set(_BINARY_COMMON) | set(_BINARY_EXTRA[family])

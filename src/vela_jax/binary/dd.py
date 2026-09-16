@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Any, NamedTuple
 
 from .. import numerics as vm
+from ..astrometry import equatorial_to_ecliptic
+from ..constants import OBL
 from ..correction import Correction, corrected_time
 from .orbit import TWO_PI, eccentric_anomaly, mean_anomaly, mean_motion
 
@@ -45,7 +47,11 @@ def shapiro_params(family: str, p):
 
 
 def kopeikin_i0_j0(ssb_psr_pos: vm.Vec3):
-    """Vela ``kopeikin_I0_J0``."""
+    """Vela ``kopeikin_I0_J0``.
+
+    ``ssb_psr_pos`` must be a unit vector in the same sky frame as ``KOM``
+    (ecliptic east/north for an ecliptic model, equatorial otherwise).
+    """
     sin_d = ssb_psr_pos[2]
     cos_d = vm.sqrt(1.0 - sin_d * sin_d)
     cos_a = ssb_psr_pos[0] / cos_d
@@ -56,11 +62,19 @@ def kopeikin_i0_j0(ssb_psr_pos: vm.Vec3):
     return i0, j0
 
 
-def kopeikin_corrections(frozen, corr, p, dt, a1, *, ecliptic: bool):
+def kopeikin_corrections(
+    frozen, corr, p, dt, a1, *, ecliptic: bool, obliquity: float = OBL
+):
     """Vela ``kopeikin_corrections``: apparent dx, domega, dinc.
 
     PINT honours ``K96 N`` by dropping the proper-motion terms; Vela always
     applies them, and so do we (``K96 N`` is refused at build).
+
+    ``ssb_psr_pos`` is ICRS (``solar_system`` rotates an ecliptic line of
+    sight). ``KOM`` is east in the model's sky frame, so the annual-parallax
+    projector uses that same frame (PINT ``update_binary_object``). The
+    rotation is Vela ``icrs_to_ecliptic``, with the same ``obliquity``
+    ``solar_system`` already used.
     """
     mu_a, mu_d = (p.PMELONG, p.PMELAT) if ecliptic else (p.PMRA, p.PMDEC)
     sin_i, cos_i = vm.sincos(p.KIN)
@@ -71,16 +85,24 @@ def kopeikin_corrections(frozen, corr, p, dt, a1, *, ecliptic: bool):
     dx_pm = a1 * cot_i * dinc_pm
     dom_pm = csc_i * (mu_a * cos_om + mu_d * sin_om) * dt
 
-    i0, j0 = kopeikin_i0_j0(corr.ssb_psr_pos)
-    di = vm.dot3(frozen.ssb_obs_pos, i0)
-    dj = vm.dot3(frozen.ssb_obs_pos, j0)
+    ssb_obs_pos = frozen.ssb_obs_pos
+    ssb_psr_pos = corr.ssb_psr_pos
+    if ecliptic:
+        ssb_obs_pos = equatorial_to_ecliptic(ssb_obs_pos, obliquity)
+        ssb_psr_pos = equatorial_to_ecliptic(ssb_psr_pos, obliquity)
+
+    i0, j0 = kopeikin_i0_j0(ssb_psr_pos)
+    di = vm.dot3(ssb_obs_pos, i0)
+    dj = vm.dot3(ssb_obs_pos, j0)
     dx_px = a1 * cot_i * p.PX * (di * sin_om - dj * cos_om)
     dom_px = -csc_i * p.PX * (di * cos_om + dj * sin_om)
 
     return dx_pm + dx_px, dom_pm + dom_px, dinc_pm
 
 
-def dd_state(frozen, corr: Correction, p, *, family, use_fbx, ecliptic=False):
+def dd_state(
+    frozen, corr: Correction, p, *, family, use_fbx, ecliptic=False, obliquity=OBL
+):
     fb = frozen.binary
     dt = corrected_time(frozen, corr) - p.T0
     dt_red = fb.dt_red - corr.delay - p.dT0
@@ -109,7 +131,9 @@ def dd_state(frozen, corr: Correction, p, *, family, use_fbx, ecliptic=False):
     m2, sini = shapiro_params(family, p)
 
     if family == "DDK":
-        dx, dom, dinc = kopeikin_corrections(frozen, corr, p, dt, a1, ecliptic=ecliptic)
+        dx, dom, dinc = kopeikin_corrections(
+            frozen, corr, p, dt, a1, ecliptic=ecliptic, obliquity=obliquity
+        )
         a1 = a1 + dx
         omega = omega + dom
         sini = vm.sin(p.KIN + dinc)

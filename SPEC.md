@@ -1085,21 +1085,32 @@ combination, ELL1k's term and ELL1H's harmonic subtraction unchanged.
 ### 7.10 DDK (`binary_ddk.jl`)
 
 ```python
-def kopeikin(frozen, corr, p, dt, x, *, ecliptic):
+def kopeikin(frozen, corr, p, dt, x, *, ecliptic, obliquity):
     mu_a, mu_d = (p.PMELONG, p.PMELAT) if ecliptic else (p.PMRA, p.PMDEC)
     si, ci = sincos(p.KIN); sO, cO = sincos(p.KOM)
     cot, csc = ci/si, 1/si
     dinc_pm = (-mu_a*sO + mu_d*cO) * dt
     dx_pm   = x * cot * dinc_pm
     dom_pm  = csc * (mu_a*cO + mu_d*sO) * dt
-    L = corr.ssb_psr_pos                              # set by solar_system
+    L = corr.ssb_psr_pos                              # ICRS; set by solar_system
+    R = frozen.ssb_obs_pos                            # ICRS
+    if ecliptic:                                      # same sky frame as KOM
+        L = equatorial_to_ecliptic(L, obliquity)      # Vela icrs_to_ecliptic
+        R = equatorial_to_ecliptic(R, obliquity)
     sd = L[2]; cd = sqrt(1 - sd*sd); ca = L[0]/cd; sa = L[1]/cd
     I0 = (-sa, ca, 0*sa); J0 = (-ca*sd, -sa*sd, cd)
-    dI = dot3(frozen.ssb_obs_pos, I0); dJ = dot3(frozen.ssb_obs_pos, J0)
+    dI = dot3(R, I0); dJ = dot3(R, J0)
     dx_px  = x * cot * p.PX * (dI*sO - dJ*cO)
     dom_px = -csc * p.PX * (dI*cO + dJ*sO)
     return dx_pm + dx_px, dom_pm + dom_px, dinc_pm
 ```
+
+`solar_system` stores `ssb_psr_pos` in ICRS. `KOM` is measured from east in
+the model's sky frame, so the annual-parallax `I0`/`J0` are built in that
+frame (PINT `update_binary_object`). The rotation is the inverse of
+`ecliptic_to_equatorial` and uses the same build-time `obliquity` as
+`solar_system`. Equatorial DDK does not rotate. Proper-motion Kopeikin
+terms already read ecliptic PM when `ecliptic`.
 
 Build-time checks: astrometry stage present; `ssb_psr_pos` populated before
 the binary (order); H3/STIGMA absent; `K96 N` refused (Vela always applies
