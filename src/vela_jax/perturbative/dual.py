@@ -60,8 +60,17 @@ class Pert(Numeric):
 
     @property
     def value(self):
-        """The perturbed value. Only for reporting; never used in a delta."""
+        """The perturbed value ``ref + delta``.
+
+        For a traced domain predicate or a report — never arithmetic in the
+        perturbation channel.
+        """
         return self.ref + self.delta
+
+    @property
+    def reference(self):
+        """The float64 reference channel. Kepler convergence reads this."""
+        return self.ref
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"Pert(ref={self.ref!r}, delta={self.delta!r})"
@@ -147,6 +156,17 @@ class Pert(Numeric):
         rel = eps / (1.0 + jnp.sqrt(1.0 + eps))
         return self._new(root, self._cast(root) * rel)
 
+    def cbrt(self):
+        """``cbrt(a+da) - cbrt(a)`` via ``b - a = (b^3 - a^3)/(b^2 + ab + a^2)``.
+
+        Subtracting two cube roots cancels the whole root. The caller
+        substitutes a positive value before the cube root.
+        """
+        a = jnp.cbrt(self.ref)
+        b = jnp.cbrt(self._cast(self.ref) + self.delta)
+        den = b * b + b * self._cast(a) + self._cast(a * a)
+        return self._new(a, self.delta / den)
+
     def arccos(self):
         """Third-order expansion of ``arccos(c*+dc) - arccos(c*)``.
 
@@ -219,6 +239,43 @@ class Pert(Numeric):
             x = x - g / slope
         return self._new(u_ref, x)
 
+    def regular_kepler(self, h, k, solver):
+        """Laplace-Lagrange perturbation, solved in the difference variable.
+
+        ``F' = F* + x``; ``sin F*`` and ``cos F*`` enter as reference factors.
+        A perturbation may cross the principal-2π cut of the reference solve;
+        this follows the nearby continuous root (downstream uses of ``F`` are
+        2π-periodic; precession reads ``lam_secular`` instead).
+        """
+        hp = self.lift_like(h)
+        kp = self.lift_like(k)
+        F_ref = solver(self.ref, hp.ref, kp.ref)
+        sin_F = self._cast(jnp.sin(F_ref))
+        cos_F = self._cast(jnp.cos(F_ref))
+        h_new = self._cast(hp.ref) + hp.delta
+        k_new = self._cast(kp.ref) + kp.delta
+
+        rhs = self.delta + kp.delta * sin_F - hp.delta * cos_F
+        x = rhs / (1.0 - k_new * cos_F - h_new * sin_F)
+        for _ in range(4):
+            sin_x = jnp.sin(x)
+            cos_x_minus_one = _cos_minus_one(x)
+            delta_sin = sin_F * cos_x_minus_one + cos_F * sin_x
+            delta_cos = cos_F * cos_x_minus_one - sin_F * sin_x
+            g = (
+                x
+                - k_new * delta_sin
+                - kp.delta * sin_F
+                + h_new * delta_cos
+                + hp.delta * cos_F
+                - self.delta
+            )
+            sin_new = sin_F * (1.0 + cos_x_minus_one) + cos_F * sin_x
+            cos_new = cos_F * (1.0 + cos_x_minus_one) - sin_F * sin_x
+            slope = 1.0 - k_new * cos_new - h_new * sin_new
+            x = x - g / slope
+        return self._new(F_ref, x)
+
     # --- structure ---------------------------------------------------------
 
     def select(self, cond, other):
@@ -226,6 +283,16 @@ class Pert(Numeric):
         return self._new(
             jnp.where(cond, self.ref, o.ref),
             jnp.where(cond, self.delta, o.delta),
+        )
+
+    def nan_where(self, valid):
+        """NaN in *both* channels where ``valid`` is false.
+
+        ``select(valid, self, nan)`` gives the scalar NaN a zero perturbation.
+        """
+        return self._new(
+            jnp.where(valid, self.ref, jnp.nan),
+            jnp.where(valid, self.delta, jnp.nan),
         )
 
     def clip(self, lo, hi):

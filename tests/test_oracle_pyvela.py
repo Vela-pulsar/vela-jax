@@ -24,7 +24,7 @@ import tempfile
 import numpy as np
 import pytest
 
-from conftest import engine_params
+from conftest import engine_params, resolve_pair
 from vela_jax import Engine
 from vela_jax.freeze import strip_noise_lines
 
@@ -53,6 +53,28 @@ def _spnta():
     return pytest.importorskip("pyvela").SPNTA
 
 
+def _require_vela_ddr():
+    """DDR needs Vela.jl's own ``feat/ddr-model``; say which half is missing.
+
+    An older Vela.jl imports and runs perfectly well for the other seven
+    families, so the generic ``importorskip`` above would let this case fail
+    deep inside pyvela's component dispatch instead of skipping.
+    """
+    _spnta()  # the ordinary pyvela/Julia skip first
+    try:
+        from juliacall import Main as jl
+
+        jl.seval("using Vela")
+        has_ddr = hasattr(jl.Vela, "BinaryDDR")
+    except Exception as exc:  # pragma: no cover - environment probe
+        pytest.skip(f"Vela.jl is not usable here: {exc}")
+    if not has_ddr:
+        pytest.skip(
+            "the installed Vela.jl has no BinaryDDR; the DDR oracle needs "
+            "Vela.jl feat/ddr-model (fcf7134)"
+        )
+
+
 CASES = engine_params(
     [
         "NGC6440E",
@@ -73,6 +95,9 @@ CASES = engine_params(
         "J1802-2124.sim",
         "J1856-3754.sim",
         "J2302+4442.sim",
+        # The eighth family. Vela.jl ships no DDR par/tim, so this one is
+        # this repository's own fixture, resolved per file (`resolve_pair`).
+        "sim_ddr",
     ]
 )
 
@@ -83,14 +108,32 @@ CASES = engine_params(
 _PAIRS: dict[str, tuple] = {}
 
 
+#: DDR needs one custom prior to reach Vela at all, and the reason is upstream.
+#: pyvela's default-prior path has a ``TASC``/``T0`` branch that calls PINT's
+#: ``PulsarBinary.pb()``, and ``pb()`` reads ``T0`` for every model whose name
+#: does not start with ``ELL1``. ``BinaryDDR`` is ``TASC``-based and exposes no
+#: ``T0``, so building an ``SPNTA`` raises ``AttributeError`` before any physics
+#: runs. Supplying *any* explicit ``TASC`` prior takes the earlier
+#: ``custom_prior_dists`` branch and steps around it. The bound below is
+#: arbitrary: these gates compare residuals, never posteriors.
+_DDR_PRIORS = {"TASC": {"distribution": "Uniform", "args": [53999.5, 54000.5]}}
+
+
 def _pair(examples, name):
     if name not in _PAIRS:
-        par, tim = examples / f"{name}.par", examples / f"{name}.tim"
-        if not (par.exists() and tim.exists()):
+        pair = resolve_pair(examples, name)
+        if pair is None:
             pytest.skip(f"fixture {name} not available")
+        par, tim = pair
+        kwargs = {}
+        if name == "sim_ddr":
+            _require_vela_ddr()
+            kwargs["custom_priors"] = _DDR_PRIORS
         stripped = pathlib.Path(tempfile.mkdtemp()) / par.name
         stripped.write_text(strip_noise_lines(par.read_text()))
-        spnta = _spnta()(str(stripped), str(tim), center_epochs=False, check=False)
+        spnta = _spnta()(
+            str(stripped), str(tim), center_epochs=False, check=False, **kwargs
+        )
         _PAIRS[name] = (
             Engine.from_pint(spnta.model_pint_modified, spnta.toas_pint),
             spnta,

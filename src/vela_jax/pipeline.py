@@ -14,7 +14,13 @@ from __future__ import annotations
 from typing import Callable, NamedTuple
 
 from .astrometry import solar_system
-from .binary import binary_stage, resolve_family, uses_fbx
+from .binary import (
+    binary_stage,
+    ddr_consumed,
+    resolve_ddr_config,
+    resolve_family,
+    uses_fbx,
+)
 from .constants import OBL, obliquity_radians
 from .correction import Correction
 from .dispersion import dispersion_piecewise, dispersion_taylor
@@ -32,6 +38,10 @@ _ECLIPTIC = ("ELONG", "ELAT", "PMELONG", "PMELAT")
 _BINARY_COMMON = ("A1", "A1DOT", "PB", "PBDOT")
 _DD_KEPLER = ("T0", "ECC", "EDOT", "OM", "OMDOT", "GAMMA", "DR", "DTH")
 _ELL1_KEPLER = ("TASC", "EPS1", "EPS2", "EPS1DOT", "EPS2DOT")
+#: Per-family consumed names for the seven pre-DDR families. **DDR is
+#: deliberately absent**: its consumed set is mode-dependent
+#: (``binary.ddr_consumed``), and indexing this table with ``"DDR"`` is a
+#: ``KeyError`` on dispatch.
 _BINARY_EXTRA = {
     "DD":    _DD_KEPLER + ("M2", "SINI"),
     "DDH":   _DD_KEPLER + ("H3", "STIGMA"),
@@ -160,6 +170,13 @@ def build_chain(
     use_fbx = False
     if family is not None:
         use_fbx = uses_fbx(model)
+        ddr_config = (
+            resolve_ddr_config(
+                model, use_fbx=use_fbx, ecliptic=ecliptic, obliquity=resolved
+            )
+            if family == "DDR"
+            else None
+        )
         stages["binary"] = (
             f"binary.{family}",
             binary_stage(
@@ -168,14 +185,24 @@ def build_chain(
                 ecliptic=ecliptic,
                 ell1_t2=conventions == "tempo2",
                 obliquity=resolved,
+                ddr_config=ddr_config,
             ),
         )
-        consumed |= set(_BINARY_COMMON) | set(_BINARY_EXTRA[family])
-        if use_fbx:
-            consumed |= set(sequences.get("FB", ()))
-            consumed -= {"PB", "PBDOT"}
-        if family == "DDK":
-            consumed |= set(_ECLIPTIC[2:] if ecliptic else _EQUATORIAL[2:])
+        if family == "DDR":
+            # `ddr_consumed` *substitutes* for the common/extra union: there is
+            # no `_BINARY_EXTRA["DDR"]`, and the seven-family `use_fbx` subtract
+            # of {PB, PBDOT} would drop names DDR's PB chart just added.
+            consumed |= ddr_consumed(ddr_config)
+            if use_fbx:
+                consumed |= set(sequences.get("FB", ()))
+                consumed -= {"FB0"}
+        else:
+            consumed |= set(_BINARY_COMMON) | set(_BINARY_EXTRA[family])
+            if use_fbx:
+                consumed |= set(sequences.get("FB", ()))
+                consumed -= {"PB", "PBDOT"}
+            if family == "DDK":
+                consumed |= set(_ECLIPTIC[2:] if ecliptic else _EQUATORIAL[2:])
 
     if "FD" in components:
         stages["frequency_dependent"] = ("frequency_dependent", frequency_dependent)

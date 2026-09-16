@@ -134,7 +134,7 @@ class VelaJaxTimingEngine:
             epoch_shift_exact=facts.epoch_shift_exact,
             secular_terms=facts.secular_terms,
             origin_certified=False,
-            supports_domain=True,
+            supports_domain=facts.supports_domain,
         )
 
     def identically_linear_fitpars(self) -> frozenset[str]:

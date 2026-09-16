@@ -62,11 +62,12 @@ does not replace a required branch with a release:
 |---|---|---|---|
 | **vela-jax** | `Vela-pulsar/vela-jax` | `main` | this package |
 | **psrdata** | `nanograv/psrdata` | `main` | the pulsar record and feather schema; a declared dependency, pip installs it |
-| **PINT** | `vhaasteren/PINT` | `metapulsar` | the default timing package: FDJUMPDM sign fix, a longdouble fix, Jodrell MkII clock chains |
+| **PINT** | `vhaasteren/PINT` | `metapulsar` | the default timing package: FDJUMPDM sign fix, a longdouble fix, Jodrell MkII clock chains, and the `BinaryDDR` schema (`feat/ddr-model`, 94527a3 or later) |
 | libstempo | `vhaasteren/libstempo` | `feat/vela-jax` | the tempo2 timing package (`Engine.from_tempo2`): exposes `siteVel`, `correction_tt`, `correction_tt_tb` |
 | tempo2 | | | the C library and `$TEMPO2` runtime, for a tempo2 read |
 | nltiming | `vhaasteren/nltiming` | `main` | sampling timing parameters: `TimingSpec`, priors, charts, the samplers |
 | Discovery | `vhaasteren/discovery` | `feat/class-tracking` | the NUTS path: `transport.class_tracking` and the `origin=` keyword |
+| Vela.jl | `vhaasteren/Vela.jl` | `feat/ddr-model` | the `oracle` extra only; `BinaryDDR` (fcf7134) is what the DDR parity gate compares against |
 | MetaPulsar | `vhaasteren/metapulsar` | `main` | several PTA datasets in one timing model, one vela-jax leg per PTA |
 | Vela.jl | `Vela-pulsar/Vela.jl` | `main` | tests only: `pyvela` as the parity oracle, and the fixture par/tim files |
 
@@ -154,7 +155,7 @@ tuple in `pyvela.model.pint_components_to_vela` order:
 
 ```
 solar_system -> solar_wind -> dispersion_taylor -> dispersion_piecewise
-             -> binary.{ELL1,ELL1H,ELL1k,DD,DDH,DDS,DDK}
+             -> binary.{ELL1,ELL1H,ELL1k,DD,DDH,DDS,DDK,DDR}
              -> frequency_dependent -> frequency_dependent_jump
              -> spindown -> phase_offset -> phase_jump
 ```
@@ -170,6 +171,19 @@ fixture. Refusals (`UnsupportedModelError`) name the offender and the supported
 set: BT/BTX/DDGR/unresolved T2, wideband, glitches, chromatic components,
 `FDJUMPLOG N`, overlapping DMX, a fitted JUMP selecting no TOA, DDK without
 astrometry or with `K96 N`, and every GP delay.
+
+**`BINARY DDR`** is the eighth family and the third Kepler convention: the
+regular Laplace-Lagrange equation in native `(EPS1, EPS2, TASC)` coordinates,
+a Cartesian viewing projector frozen at `TGEO`, and a regular `q = ν − M`
+periastron advance. It needs PINT's `feat/ddr-model` branch for the schema,
+and it is **PINT-host-only** — tempo2 implements no DDR model, so
+`Engine.from_tempo2` (and `from_files(..., timing_package="tempo2")`) refuses
+a `BINARY DDR` par by name *before* tempo2 is invoked, rather than letting it
+fail opaquely or resolve to a different model. DDR is also the one family
+whose sampled domain is not total: a `(A1, PB, M2, COSI)` a sampler proposes
+can imply a negative pulsar mass, and the engine then returns NaN residuals
+rather than clamping. It reports `supports_domain=False` so nltiming does not
+assume otherwise.
 
 ## Precision
 
@@ -244,6 +258,11 @@ them.
 engine = Engine.from_tempo2("psr.par", "psr.tim", binary_conventions="tempo2")
 engine.timing_package, engine.source_units    # ("tempo2", "TCB"), or "TDB" if it said so
 ```
+
+One family is not available this way. tempo2 has no `BINARY DDR` model at all,
+so a DDR par is refused by name here — after the common PINT parse, which is
+what identifies the family, and before a libstempo pulsar exists. DDR uses the
+PINT host only.
 
 A tempo2 par is TCB unless it says otherwise (no `UNITS` line means TCB, and
 `UNITS SI` is tempo2's spelling of it), so the text is normalised to TDB with

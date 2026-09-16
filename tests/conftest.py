@@ -63,6 +63,42 @@ def examples() -> Path:
     return path
 
 
+#: The DDR pair lives in this repository, not in Vela.jl's examples, and is
+#: addressed **by path**: :func:`fixture_dir` returns the first directory that
+#: has any par file, so a sibling Vela.jl checkout would otherwise hide
+#: ``tests/fixtures/sim_ddr.par`` entirely. For the same reason ``sim_ddr`` is
+#: deliberately absent from :data:`ENGINES`, whose sweeps go through
+#: ``fixture_dir``.
+DDR_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+def resolve_pair(examples, name) -> tuple[Path, Path] | None:
+    """``(par, tim)`` for one fixture, this repository's own included.
+
+    Resolution is per *file*, not per directory: :func:`fixture_dir` returns
+    the first directory holding any par at all, so a sibling Vela.jl checkout
+    would otherwise hide ``tests/fixtures`` wholesale. This way every Vela
+    fixture still comes from Vela.jl and ``sim_ddr`` -- which Vela.jl has no
+    equivalent of -- is found where it actually lives.
+    """
+    for directory in (examples, DDR_FIXTURE_DIR):
+        if directory is None:
+            continue
+        par, tim = directory / f"{name}.par", directory / f"{name}.tim"
+        if par.exists() and tim.exists():
+            return par, tim
+    return None
+
+
+@pytest.fixture(scope="session")
+def ddr_fixture() -> tuple[Path, Path]:
+    """``(par, tim)`` for the committed geometry-off DDR fixture."""
+    pair = resolve_pair(None, "sim_ddr")
+    if pair is None:
+        pytest.skip("the sim_ddr fixture is missing")
+    return pair
+
+
 @pytest.fixture(scope="session")
 def tempo2_available() -> bool:
     """``libstempo.sandbox`` importable, and a tempo2 binary on PATH.
@@ -104,10 +140,10 @@ def tempo2_engine_factory(examples):
     def build(name: str, conventions: str = "pint"):
         key = (name, conventions)
         if key not in cache:
-            par, tim = examples / f"{name}.par", examples / f"{name}.tim"
-            if not (par.exists() and tim.exists()):
+            pair = resolve_pair(examples, name)
+            if pair is None:
                 pytest.skip(f"fixture {name} not available")
-            cache[key] = Engine.from_tempo2(par, tim, binary_conventions=conventions)
+            cache[key] = Engine.from_tempo2(*pair, binary_conventions=conventions)
         return cache[key]
 
     return build
@@ -122,10 +158,10 @@ def engine_factory(examples):
 
     def build(name: str):
         if name not in cache:
-            par, tim = examples / f"{name}.par", examples / f"{name}.tim"
-            if not (par.exists() and tim.exists()):
+            pair = resolve_pair(examples, name)
+            if pair is None:
                 pytest.skip(f"fixture {name} not available")
-            cache[name] = Engine.from_files(par, tim)
+            cache[name] = Engine.from_files(*pair)
         return cache[name]
 
     return build

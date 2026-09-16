@@ -261,6 +261,215 @@ itself on the uncapped suite. If a use case ever needs deltas that large, the
 fix is to carry `Δdoppler` in the assembly: a few lines, since the chain
 already computes it.
 
+## DDR (SPEC §12, gates D1-D8)
+
+The eighth family, added in v2.6. Measured on `tests/fixtures/sim_ddr.{par,tim}`
+-- 20 barycentric zero-noise TOAs, `PB` one day, geometry off, the last two
+straddling 10<sup>4</sup> reference orbits -- plus the scalar anchors Vela.jl's
+own `test/test_ddr.jl` carries, and two geometry models `tests/test_ddr.py`
+builds for itself (the committed fixture is barycentric, and a zero observer
+vector cannot exercise a parallax projector).
+
+### Against Vela.jl and against Vela's scalar anchors
+
+| what | oracle | budget | measured |
+|---|---|---|---|
+| absolute residuals, `sim_ddr` (T4) | Vela.jl `SPNTA` | RMS ≤ 1 ns, max ≤ 10 ns | **RMS 8.0 ps, max 20 ps** |
+| posterior-scale deltas, 4 joint draws (T7) | Vela.jl `SPNTA` | max ≤ 10 ns | **max 56 ps** |
+| PK-chart delay at TASC + {0, 21600, 43200} s | `test_ddr.jl` table | 1 ps | **≤ 1·10<sup>-15</sup> s** |
+| phenomenological chart (`DDRPK N`, `GGAMMA = OMDOT = 0`) | `test_ddr.jl` table | 1 ps | **≤ 1·10<sup>-15</sup> s** |
+| FBX chart, `FB0 = 1/86400` | `test_ddr.jl` table | 1 ps | **≤ 1·10<sup>-15</sup> s** |
+| injected-`(I, J)` geometry anchors | `test_ddr.jl` table | 1 ps | **≤ 3.1·10<sup>-14</sup> s** |
+| `mp`, `g_gamma`, derived `κ` | `test_ddr.jl` | rel 10<sup>-8</sup>..10<sup>-10</sup> | 0.7741081166, 0.0071937506, 2.0501533373·10<sup>-6</sup> |
+| kinematic `Pbdot`: `p`, `p_shk`, `p_gal`, `p_gw` | `test_ddr.jl` | rel 10<sup>-10</sup> | **rel ≤ 3·10<sup>-15</sup>** |
+
+Reaching Vela at all needs one workaround, and it is upstream of this package:
+pyvela's default-prior path has a `TASC`/`T0` branch that calls PINT's
+`PulsarBinary.pb()`, and `pb()` reads `T0` for every model whose name does not
+begin with `ELL1`. `BinaryDDR` is `TASC`-based and exposes no `T0`, so building
+an `SPNTA` raises `AttributeError` before any physics runs. The oracle test
+supplies an explicit `TASC` prior, which takes the earlier custom-prior branch
+and steps around it; the bound is arbitrary, because these gates compare
+residuals rather than posteriors.
+
+### Against PINT
+
+PINT is an independent oracle here, and the authority for one deliberate
+deviation: Vela's DDR hard-codes the IERS2010 obliquity, this package resolves
+the par's `ECL` (SPEC §7.3, §7.10b), and PINT honours `ECL` too.
+
+| what | budget | measured |
+|---|---|---|
+| derived TGEO triad, real equatorial geometry, 100-day span (D3) | 1 ps | **0.89 ps** |
+| `ECL` movement IERS2003 → IERS1992, isolated binary stage (D4) | moves materially; agreement 1 ps | **moves 615 ps; agreement 0.046 ps** |
+
+Both comparisons freeze **one** pre-binary `Correction` and hand the same
+object to each vela-jax evaluation and the same numeric accumulated delay to
+each PINT component. Re-running each model's solar-system stage would change
+`corrected_time` as well and would measure that instead of DDR geometry.
+
+### One constant mismatch, pinned rather than fixed (D8)
+
+The equatorial PINT comparison is gated at a **100-day** span deliberately. Over
+three years it degrades to ~10 ps, and the excess is not geometry: it is a
+linear-in-time drift with a single measured cause.
+
+`M2` enters the layout in seconds through PINT's own `tcb2tdb_scale_factor`,
+which is `GMsun/c³ = 4.9254909476412675·10⁻⁶ s`. DDR then recovers
+dimensionless solar masses as `m2 / M_SUN` with Vela's hard-coded literal
+`4.92549094830932·10⁻⁶`. The two differ by **−1.3563·10⁻¹⁰ relative**, so
+`mc` is `0.7999999998914947` where the par said `M2 0.8`.
+
+DD and ELL1 never see it: they use `m2` in seconds and the constant cancels out
+of `−2 m2 log(...)`. DDR's GR maps do see it, and `κ` carries it into a
+*secular* precession angle, so the disagreement with PINT grows linearly:
+
+| span | drift vs PINT |
+|---|---|
+| 100 d | 0.89 ps |
+| 1095 d | 9.8 ps |
+| 10<sup>4</sup> orbits (the committed fixture) | ≈ 90 ps |
+
+Ablation isolated it completely. With `κ = 0` (`DDRPK N`, `OMDOT 0`) the
+agreement is 3·10⁻¹⁴ s and *flat* over the same 1095 days; a phenomenological
+`OMDOT` six times smaller than `κ_GR` is also flat, so the drift is not simply
+proportional to the precession rate. Field by field against PINT's own DDR
+state, `x`, `n`, `c`, `s`, `c_e`, `s_e`, `I` and `J` all agree to ~10⁻¹⁶
+relative; `X`/`Y` and their derivatives drift to 2·10⁻¹² by the last row; and
+`g_gamma` is off by a constant 4.5·10⁻¹¹ relative -- the same mismatch seen
+through a different power. Recovering the precession angle from the rotated
+`(X, Y)` pair gives `Δδ/δ = −1.356·10⁻¹⁰` at every row, which is exactly
+`mc/0.8 − 1`.
+
+It is **not fixed**, for a stated reason. `binary/ddr.py` is a translation and
+Vela.jl is the porting authority (SPEC §2); Vela.jl has exactly this
+inconsistency, since pyvela also converts `M2` with PINT's scale factor and
+then divides by Vela's literal. Changing it would move this engine away from
+Vela.jl by the same 1.36·10⁻¹⁰ while nothing in the Vela or PINT budgets here
+is threatened either way. `tests/test_ddr.py` pins the number instead, so it
+cannot change size unnoticed, and `constants.M_SUN` cannot be edited without a
+red test. **If an owner would rather the two agree, the one-line change is to
+recover `mc` with the same constant the layout multiplied by** -- that is a
+physics decision about which `T_⊙` the GR maps use, not a bug fix.
+
+### What the consumer actually sees at an invalid point
+
+vela-jax returns NaN and stops there (D13): turning a non-finite residual into
+a rejected sample belongs to the sampler. The other half of that contract is
+asserted in nltiming
+(`tests/test_discovery_host_delay.py::test_an_engine_outside_its_domain_gives_a_non_finite_log_likelihood`),
+on a stub engine that reproduces DDR's NaN boundary without needing a DDR par.
+
+Measured: Discovery **propagates the NaN**, eagerly and under `jit`, so
+`logL` is NaN -- *not* `-inf`, which is the word SPEC §12.5 uses. Both are
+rejected by a Metropolis test (every comparison against NaN is false) and by
+NumPyro's divergence handling, so nothing is wrong today. They are not
+interchangeable for a sampler that branches on `isneginf` or that feeds the
+value into adaptation, so the observed value is pinned separately from the
+`not isfinite` gate and a change would be visible rather than silent.
+
+### The regular-Kepler solver (D6)
+
+The production loop count is **16**, chosen by measurement. The probe is
+deterministic and re-run in `tests/test_ddr_performance.py`:
+
+```python
+rng = np.random.default_rng(20260916)
+radius = 0.99 * np.sqrt(rng.random(2_000_000))
+angle  = rng.uniform(-np.pi, np.pi, radius.size)
+h, k   = radius * np.sin(angle), radius * np.cos(angle)
+lam    = rng.uniform(-np.pi, np.pi, radius.size)
+```
+
+First-converged **0-based loop index** (the index of the pass whose *incoming*
+`F` already met `|residual| ≤ 4 eps max(1, |λ_red|)`):
+
+| index | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| points | 0 | 124 | 65 849 | 768 793 | 928 014 | 176 723 | 59 771 | 704 | **22** |
+
+Nothing fails within 64. The maximum is **8** -- the 9th pass -- so 16 retains
+seven unused passes after it. The 22 index-8 points are committed as
+hexadecimal float64 so the gate survives a NumPy RNG change. An assertion
+written against a 1-based *pass count* would be off by one.
+
+The committed stress grid (65 radii × 128 angles × 257 longitudes, including
+both `nextafter` neighbours of ±π) converges within 16 at every point.
+
+### The reduced longitude at 10<sup>4</sup> orbits (T13)
+
+DDR's PB chart meets the 0.05 ps floor with room. Its **FBX** chart does not,
+and the shortfall is one named rounding rather than an accumulation:
+`fbx_mean_longitude` retains the integer orbits through `n_orb·(FB0·P★ − 1)`,
+`P★` is the float64 `1/FB0★`, and `FB0·P★` rounds to **exactly 1.0** while its
+true value differs by ~5·10⁻¹⁷. At 10⁴ orbits that is ~5·10⁻¹³ turns, about
+**16 ps** of equivalent Roemer delay.
+
+This is the reduction identity's own floor and is shared verbatim with
+`binary/orbit.py::mean_anomaly`, which every FBX family already uses -- DDR did
+not introduce it, and it is invisible on any fixture with a shorter baseline.
+The test asserts that the error **is** that term to a relative 10⁻⁶ rather
+than widening a tolerance, so a real regression still fails.
+
+### Perturbative (T14, T15)
+
+`sim_ddr`, mode `binary+astrometry` (the fixture freezes astrometry, so the
+live set is `PB, A1, M2, TASC, EPS1, EPS2, COSI`):
+
+| dtype | max abs | max rel | Jacobian rel | verdict |
+|---|---|---|---|---|
+| float64 | 4.23·10<sup>-15</sup> s | 2.11·10<sup>-10</sup> | 7.2·10<sup>-16</sup> | pass (budget 10<sup>-12</sup> s / 10<sup>-6</sup>) |
+| float32 | 3.40·10<sup>-11</sup> s | 1.67·10<sup>-7</sup> | 3.4·10<sup>-7</sup> | pass (rtol 10<sup>-5</sup>, atol 10<sup>-12</sup> s) |
+
+This is the first family to exercise `Pert.regular_kepler` and `Pert.cbrt`, and
+the reference-channel convergence rule of R11.3-0: the difference solve runs in
+the working dtype while convergence is read off the float64 reference channel.
+
+### Cost (D7)
+
+Measured with the protocol in `tests/test_ddr_performance.py`: one cold call
+timed separately, five unmeasured warm calls, an inner repetition count chosen
+so a sample is at least 50 ms and then shared by every kernel, 25 synchronised
+samples in alternating order, medians compared. Absolute wall clock is
+informational -- CI hardware varies -- and the **ratios** are the gate.
+
+Device: CPU, aarch64 container, JAX 0.8.0, float64, 20 000 rows.
+
+| comparison | median | ratio | ceiling |
+|---|---|---|---|
+| 16-step kernel | 3.83 ms | | |
+| 64-step twin, same algorithm | 13.38 ms | **0.286** | ≤ 0.35 |
+| production JVP (implicit rule) | 3.77 ms | **0.96** of one primal | ≤ 2 |
+| `binary.orbit.mikkola` on the same rows | 1.24 ms | DDR/Mikkola **3.02** | ≤ 10 |
+| `binary.DDR` stage | 3.40 ms | | |
+| `binary.DD` stage, same 20 000 rows | 1.62 ms | **2.09** | ≤ 15 |
+
+The two kernels return *identical* roots (max difference 0.0), so the loop-count
+ratio is not a faster kernel stopping early.
+
+Compile, once per shape: 0.62 s for the 16-step primal, 1.98 s for the 64-step
+primal, 0.60 s for the production JVP.
+
+**Two measurement traps, both hit before the numbers above were believed.**
+
+*The stage comparison must trace the orbital epoch.* With only `A1` traced,
+every input to the Kepler solve is a compile-time constant, XLA folds the whole
+solve away, and the measurement reports **1.28** -- on a stage whose solver
+alone takes longer than the entire time measured. With a live epoch (which is
+also what a sampler moves) the ratio is 2.09.
+
+*The "16-vs-64 gradient ratio" cannot be measured honestly.* With the implicit
+custom JVP the differentiated cost is independent of the loop count, because
+the rule evaluates the primal once and applies a closed form -- so such a ratio
+only reports whichever primal the rule happened to call. And a 64-step twin
+*without* a custom rule is not a usable reference: forward-mode through 64
+nested `where`/bracket levels **did not finish compiling in six minutes** on
+this device, against two seconds for the same kernel's primal. That is the
+measured justification for the custom JVP, stronger than the design note it
+replaces, and it is why the gradient gate is "the rule costs one primal solve"
+rather than a loop-count ratio. The six-minute compile is recorded here rather
+than paid for on every slow run.
+
 ## Frozen parameters the engine consumes or refuses (SPEC §12, gate P7)
 
 `validate_model` allow-lists components and §6.1 refuses *free* parameters no

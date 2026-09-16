@@ -26,6 +26,7 @@ map in one place:
 | `src/model/binary/orbit.jl` | [`binary/orbit.py`](../src/vela_jax/binary/orbit.py) | Mikkola with "substitute, then select" for the traced branches |
 | `binary_dd_base.jl`, `binary_dd.jl`, `binary_ddh.jl`, `binary_dds.jl`, `binary_ddk.jl` | [`binary/dd.py`](../src/vela_jax/binary/dd.py) | one `DDState`, `shapiro_params` dispatched at build; ecliptic DDK rotates ICRS vectors into KOM's frame before `I0`/`J0` |
 | `binary_ell1_base.jl`, `binary_ell1.jl`, `binary_ell1h.jl`, `binary_ell1k.jl` | [`binary/ell1.py`](../src/vela_jax/binary/ell1.py) | the three polynomials transcribed term by term |
+| `binary_ddr.jl` (`feat/ddr-model`, fcf7134) | [`binary/ddr.py`](../src/vela_jax/binary/ddr.py) | **changed** in five places and no others: R4.5 orbit reduction (and R4.5b's secular restoration for precession), traced validity masks in place of Vela's scalar early returns, the certified 16-step implicit/`Pert` regular-Kepler and `cbrt` primitives, and `ECL`-aware obliquity with `astrometry.py`'s already-tested rotations rather than a local copy. Names, ordering, constants and formula grouping are Vela's throughout |
 | `src/model/spindown.jl` | [`spindown.py`](../src/vela_jax/spindown.py) | **changed**: the `F_`/`F0` Double64 split becomes a full build-time longdouble reduction |
 | `src/model/phase_offset.jl`, `src/model/jump.jl` | [`phase.py`](../src/vela_jax/phase.py) | JUMP × constant `F0`, as Vela |
 | `GeometricUnits` `taylor_horner*` | [`taylor.py`](../src/vela_jax/taylor.py) | plus `factorial_series` for the spin tail |
@@ -57,7 +58,7 @@ whose identity is cited to `ELL1model.C`.
 | 2 | `SolarWindDispersion` | `solar_wind` | done |
 | 3 | `DispersionDM` | `dispersion_taylor` | done |
 | 4 | `DispersionDMX` | `dispersion_piecewise` | done |
-| 5 | `Binary*` | `binary.<family>` | done — all seven families |
+| 5 | `Binary*` | `binary.<family>` | done — all eight families: ELL1, ELL1H, ELL1k, DD, DDH, DDS, DDK, **DDR** (v2.6). DDR is PINT-host-only |
 | 6 | `FD` | `frequency_dependent` | done |
 | 7 | `FDJump` (`FDJUMPLOG Y`) | `frequency_dependent_jump` | done |
 | 8 | `Spindown` | `spindown` | done (**changed**: build-time longdouble reduction) |
@@ -189,9 +190,9 @@ ledger.
 | T10 | the trace never calls PINT | done | `test_engine.py` |
 | T11 | noise-line strip is residual-neutral | done | `test_freeze.py` |
 | T12 | live `T0`/`TASC`/`PB` vs pyvela | done | `test_oracle_pyvela.py` |
-| T13 | orbit-count reduction vs unreduced | done | `test_precision.py` |
-| T14 | perturbative fp64 vs the full engine | done, all 8 | `test_perturbative.py`; capped at 20 µs of residual change, above which the assembly's second-order term dominates and is [bounded separately](PARITY.md#the-perturbative-engines-validity-domain) |
-| T15 | perturbative fp32, **full fixture set incl. `J2302+4442`** | done, all 8 | `test_perturbative.py`; R11.3 rule 1 closed the DDS gap |
+| T13 | orbit-count reduction vs unreduced | done; **DDR FBX measured, not met** | `test_precision.py`; `test_ddr.py` for DDR's own longitude. The DDR PB chart meets the 0.05 ps floor with room; the DDR **FBX** chart sits at ≈ 16 ps at 1e4 orbits, and the test asserts that the error *is* one named rounding (`FB0·P★` rounds to exactly 1.0, so `n_orb·(FB0·P★ − 1)` loses a true ~5·10⁻¹⁷) rather than loosening the bound. That floor is the reduction identity's own and is shared verbatim with `binary/orbit.py`, so it predates DDR |
+| T14 | perturbative fp64 vs the full engine | done, all 9 | `test_perturbative.py`; capped at 20 µs of residual change, above which the assembly's second-order term dominates and is [bounded separately](PARITY.md#the-perturbative-engines-validity-domain) |
+| T15 | perturbative fp32, **full fixture set incl. `J2302+4442`** | done, all 9 | `test_perturbative.py`; R11.3 rule 1 closed the DDS gap, and `sim_ddr` adds the regular-Kepler difference solve and `Pert.cbrt` |
 | T16 | fp32 inside a Discovery fp32 likelihood | done, smoke | `examples/nuts_fp32.py`: the fp32 perturbative engine drives a Discovery likelihood whose linear algebra is `working=float32`, and the `SINI`/`M2` posterior matches the fp64 run within MC error |
 
 ### v2 gates (SPEC §12, new)
@@ -211,6 +212,21 @@ ledger.
 | N1 | nltiming installed: protocols, validators, gauge assert, `TimingSpec` end to end, hybrid manifest | done | `test_nltiming_integration.py`, and a **mandatory** CI job (`.github/workflows/ci.yml`) |
 | P7 | R5.3b: `A0`/`B0`/`SWM 1`/wideband refused by name; frozen bare `DMX` inert; `ECL` read and tracking PINT | done | `test_freeze.py`; the `ECL` shift matches PINT's to <0.1% |
 
+### DDR gates (SPEC §12, v2.6)
+
+| # | gate | status | test |
+|---|---|---|---|
+| D1 | Vela's scalar delay anchors, PK / phenomenological / FBX, plus `mp`, `g_gamma`, derived `κ` | done | `test_ddr.py`; ≤ 10⁻¹⁵ s against a 1 ps budget |
+| D2 | Vela's injected-`(I, J)` anchors and its piecewise kinematic `Pbdot` | done | `test_ddr.py`; ≤ 3·10⁻¹⁴ s, `Pbdot` pieces to 3·10⁻¹⁵ relative |
+| D3 | the derived TGEO triad against PINT's own DDR kernel | done | `test_ddr.py`; 0.89 ps at a 100-day span — longer spans are limited by D8, not by geometry |
+| D4 | the `ECL` movement, isolated to the binary stage | done | `test_ddr.py`; moves 615 ps, agrees to 0.046 ps |
+| D5 | the traced invalid domain: NaN not an exception, under `jit`; `jacfwd` finite at a valid reference; an invalid TZR row NaNs every residual | done | `test_ddr.py` |
+| D6 | the 16-pass solver on the stress grid, the 2·10⁶-point probe and the 22 retained worst cases | done | `test_ddr_performance.py` |
+| D7 | four cost ratios on 20 000 rows | done | `test_ddr_performance.py`; 0.288 / 1.08 / 2.85 / 2.15 against 0.35 / 2 / 10 / 15 |
+| D8 | the `M2 / M_SUN` constant mismatch is pinned | done, **deliberately not fixed** | `test_ddr.py`; −1.36·10⁻¹⁰ relative, see [PARITY](PARITY.md#one-constant-mismatch-pinned-rather-than-fixed-d8) |
+
+---
+
 ### Gates added beyond the spec
 
 | gate | why | test |
@@ -224,6 +240,9 @@ ledger.
 | the site velocity comes from tempo2's `siteVel` | `observatory_earth[3:6]` is zero, and the Roemer closure cannot see it | `test_read_tempo2.py` |
 | ecliptic DDK annual parallax is in KOM's frame | mixed ICRS/`KOM` is 2.2 μs on `sim_ddk.as_ECL()`; equatorial `sim_ddk` cannot see it | `test_ddk.py` |
 | a bare `-pn` flag is not a phase connection | tempo2 reads the flags only under `TRACK −2`; claiming otherwise advertises an authority it never exercised | `test_tempo2_gates.py` |
+| the DDR stage benchmark traces the **orbital epoch** | with only `A1` traced, XLA constant-folds the whole Kepler solve and the "measurement" reports 1.28× on a stage whose solver alone is slower than the time measured | `test_ddr_performance.py` |
+| the DDR solver's convergence is read from the production predicate, not a numpy re-check | the tolerance is four ulp, and numpy's and XLA's `sin`/`cos` differ by one or two — a numpy re-check of a JAX root reports spurious failures on a 2·10⁶-point grid | `test_ddr_performance.py` |
+| the implicit JVP costs one primal solve | a 16-vs-64 *gradient* ratio is not measurable (the rule is loop-count independent), and the un-ruled 64-step twin does not compile in six minutes — which is the real justification for the rule | `test_ddr_performance.py` |
 
 ---
 
@@ -233,6 +252,11 @@ Each raises `UnsupportedModelError` naming the offender and the supported set.
 
 | refused | where |
 |---|---|
+| `BINARY DDR` on the **tempo2** host (tempo2 has no DDR model) | `read_tempo2.py::load`, after the common PINT parse and before `load_pulsar` |
+| DDR without astrometry; an unknown `DDRPBDOT`; FBX with a kinematic or Shklovskii `Pbdot`; `DDRGEO Y` without `DDRKINE Y` in the PB chart; geometry/kinematics without `PX > 0`; `DDRGEO Y` without `KOM`; a required DDR parameter absent | `binary/__init__.py::resolve_ddr_config` / `validate_ddr_model` |
+| a non-default DDR galaxy constant (`DDRR0`, `DDRTHETA0`, `DDRRHO0`, `DDRZ0`, `DDRZSUN`) | `freeze.py::PINNED_PARAMS` — the physics uses Vela's already-converted literals, so a moved constant would be ignored in silence |
+| a non-zero `EDOT` / `EPS1DOT` / `EPS2DOT` / `DR` / `DTH` under DDR | `freeze.py::account_for_parameters` (frozen zeros stay inert) |
+| a free `TGEO` | `freeze.py::validate_model` |
 | a non-zero parameter no stage evaluates (`A0`, `B0`, …) | `freeze.py::account_for_parameters` (R5.3b) |
 | `SWM 1` / `SWM 2` (PINT's You+2007 solar wind) | `freeze.py::PINNED_PARAMS` (`TIMEEPH`/`T2CMETHOD` are inert ingest flags, not pinned) |
 | fitted bare `DMX` (the info line, not `DMX_NNNN`) | `engine.py` unconsumed free parameter; frozen `DMX` is `INERT_PARAMS` |
@@ -243,10 +267,17 @@ Each raises `UnsupportedModelError` naming the offender and the supported set.
 | overlapping or incomplete DMX coverage | `freeze.py::dmx_index` |
 | a *fitted* JUMP selecting no TOA (a frozen one is dropped with a warning) | `freeze.py::_drop_empty_jumps` |
 | DDK without astrometry, DDK with H3/STIGMA, DDK with `K96 N` | `freeze.py::validate_model` |
-| free `PEPOCH` / `POSEPOCH` / `DMEPOCH` | `freeze.py::validate_model` |
+| free `PEPOCH` / `POSEPOCH` / `DMEPOCH` / `TGEO` | `freeze.py::validate_model` |
 | a free parameter no component consumes | `engine.py` |
 | a binary par without exactly one of `PB`/`FB0` | `binary/__init__.py::uses_fbx` |
 | **not** refused: `CORRECT_TROPOSPHERE Y` | accepted with a warning — see [REVIEW](REVIEW.md#troposphere-and-a-par-with-no-sky) |
+
+DDR's refusals split deliberately: everything a *par* can state wrongly is a
+build error, while everything a *sampler* can propose out of domain — `COSI`,
+the inferred pulsar mass, an evolved `A1`, the phase slope, the Shapiro
+argument — is a traced mask that returns NaN instead. Turning a non-finite
+residual into a `−inf` log density is Discovery's/nltiming's job, not this
+package's.
 
 Wideband TOAs **are** refused explicitly (R5.3b). Until v2.2 they were merely
 not read — the freeze takes the narrowband columns, so a wideband par built and
@@ -257,9 +288,9 @@ and is the same class of silence as the dropped parameters above.
 
 ## Test inventory
 
-127 test functions, 343 cases, in three tiers — `make fast` (37 cases, ~11 s,
-no par/tim read), `make test` (247, ~120 s, one fixture per binary family)
-and `make full` (343, ~280 s, everything). The counts come from
+205 test functions, 473 cases, in three tiers — `make fast` (124 cases, ~19 s,
+no par/tim read), `make test` (~355, ~110 s, one fixture per binary family)
+and `make full` (473, everything). The counts come from
 `pytest --collect-only`; the wall clocks were measured on an 8-core aarch64
 container. The tiers are markers, so a gate cannot weaken between them:
 `slow` is breadth over the remaining fixtures, never a looser budget. Every
@@ -268,19 +299,21 @@ file skips cleanly without its optional dependency.
 | file | tests | covers |
 |---|---:|---|
 | `test_engine.py` | 10 | T2, T3, T8, T9, M1, T10; facts and the exact-θ round trip |
-| `test_freeze.py` | 19 | T1, T11; the noise classifier, the refusals |
+| `test_freeze.py` | 42 | T1, T11; the noise classifier, the refusals, and DDR's build-time mode/accountability refusals |
 | `test_precision.py` | 6 | §4: the epoch reduction, `phi_ref`, `spin_coeffs`, T13 |
 | `test_taylor.py` | 3 | the factorial convention, against PINT's own `taylor_horner` |
 | `test_orbit.py` | 4 | T6; Mikkola, its 2π-equivariance, its gradient at the singular inputs |
 | `test_ddk.py` | 4 | ecliptic DDK annual-parallax frame; ICRS vs `as_ECL()` on `sim_ddk` |
-| `test_perturbative.py` | 8 | T14, T15; the dual's identities, its Kepler solve, the assembly's validity domain |
-| `test_oracle_pyvela.py` | 3 | T4, T7, T12 — the Vela.jl oracle (`oracle` marker) |
+| `test_perturbative.py` | 8 | T14, T15; the dual's identities, its Kepler solve, the assembly's validity domain (now over nine fixtures, `sim_ddr` included) |
+| `test_ddr.py` | 37 | **D1–D5**: Vela's scalar anchors and helper identities, the reduced/secular longitude, the custom JVP, `Pert.regular_kepler`/`cbrt`/`nan_where`, the traced domain and its TZR crossing, the TGEO triad and the `ECL` movement against PINT, and the pinned `M2 / M_SUN` constant mismatch |
+| `test_ddr_performance.py` | 8 | **D6, D7**: the stress grid, the 2·10⁶-point probe, the 22 retained worst cases, and the four cost ratios (16-vs-64 primal, the implicit JVP against one primal solve, solver-vs-Mikkola, `binary.DDR`-vs-`binary.DD`) |
+| `test_oracle_pyvela.py` | 3 | T4, T7, T12 — the Vela.jl oracle (`oracle` marker), `sim_ddr` included |
 | `test_tcb.py` | 1 | the `UNITS` rules and the TCB→TDB transform |
-| `test_read_tempo2.py` | 15 | Addendum A: columns, closure, no re-clocking, pulse numbers, **H7** |
+| `test_read_tempo2.py` | 16 | Addendum A: columns, closure, no re-clocking, pulse numbers, **H7**, and the DDR host refusal |
 | `test_tempo2_gates.py` | 5 | Addendum A.6: **H8** and **S4** |
 | `test_binary_conventions.py` | 6 | Addendum A.4: the ELL1 truncation |
 | `test_pulsar_data.py` | 17 | Addendum B: **P1, P2, P3, P5, P6**, the record's shape and forwarding |
 | `test_feather.py` | 3 | Addendum B.5: **P4**, schema v1, both consumers' readers |
 | `test_pulsar.py` | 12 | Addendum B.6: composition, dispatch, kwargs, `derivative_method` |
 | `test_backend.py` | 6 | Addendum B.7: the protocol shape, chart facts, the mirror's invariant |
-| `test_nltiming_integration.py` | 9 | **N1** — the same, against the real nltiming protocols |
+| `test_nltiming_integration.py` | 12 | **N1** — the same, against the real nltiming protocols, plus DDR's chart facts, its registry coverage and its NaN-to-consumer contract |

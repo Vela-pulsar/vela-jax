@@ -41,6 +41,9 @@ ZERO_DEFAULTS = (
     "EPS1", "EPS2", "EPS1DOT", "EPS2DOT", "LNEDOT",
     # Shapiro, in its three parametrisations
     "M2", "SINI", "H3", "STIGMA", "SHAPMAX", "KIN", "KOM",
+    # DDR. One layout serves both mode pairs; validate_ddr_model requires COSI
+    # always, GGAMMA under DDRPK N, TGEO for geo/kine.
+    "COSI", "GGAMMA", "TGEO",
 )
 # fmt: on
 

@@ -18,7 +18,8 @@ help:
 	@echo "                (pytest -m 'not slow and not oracle' $(PARALLEL))"
 	@echo "full   ~280 s   everything, including the oracle and tempo2 gates"
 	@echo "                (pytest --certify=full $(FULL_PARALLEL))"
-	@echo "oracle          only the Vela.jl parity gates (needs the 'oracle' extra)"
+	@echo "oracle          only the Vela.jl parity gates (needs the 'oracle' extra;"
+	@echo "                pins JULIA_CPU_TARGET -- override with ORACLE_JULIA_CPU_TARGET)"
 	@echo "tempo2          only the tempo2 timing-package gates (needs libstempo + tempo2)"
 	@echo "lint            black --check + ruff"
 	@echo "format          black + ruff --fix"
@@ -38,8 +39,16 @@ test:
 full:
 	pytest -q --certify=full $(FULL_PARALLEL)
 
+# Vela.jl precompiles per CPU target, and juliacall inherits JULIA_CPU_TARGET
+# from the environment. A container that exports an invalid one -- the
+# devcontainer this was developed in exports `generic/vela` -- fails to
+# precompile Vela for *every* family, so `make oracle` reports a red run that
+# has nothing to do with the physics. Pin a valid target here and let a caller
+# override it: `make oracle ORACLE_JULIA_CPU_TARGET=native`.
+ORACLE_JULIA_CPU_TARGET ?= generic
+
 oracle:
-	pytest -q -m oracle
+	JULIA_CPU_TARGET=$(ORACLE_JULIA_CPU_TARGET) pytest -q -m oracle
 
 tempo2:
 	pytest -q -m tempo2

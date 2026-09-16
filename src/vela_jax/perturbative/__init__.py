@@ -41,6 +41,9 @@ BINARY_AXES = (
     "A1", "PB", "FB0", "ECC", "OM", "T0", "EPS1", "EPS2", "TASC",
     "SINI", "M2", "H3", "STIGMA", "SHAPMAX", "KIN", "KOM", "GAMMA",
     "OMDOT", "PBDOT", "EDOT", "A1DOT", "EPS1DOT", "EPS2DOT", "LNEDOT",
+    # DDR. `TGEO` is frozen metadata, not an axis, and the static mode and
+    # galaxy parameters are not axes either.
+    "COSI", "GGAMMA", "XPBDOT",
 )
 # fmt: on
 

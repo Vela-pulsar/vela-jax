@@ -359,3 +359,30 @@ def test_native_libstempo_is_not_a_path():
 
     with pytest.raises(TypeError, match="libstempo.sandbox"):
         load("unused.par", "unused.tim", sandbox=False)
+
+
+@pytest.mark.no_tempo2
+@pytest.mark.unit
+def test_binary_ddr_is_refused_before_tempo2_is_invoked(monkeypatch, ddr_fixture):
+    """tempo2 has no DDR model at all, so the host must say so by name.
+
+    Letting the par through would end in an opaque parser failure or -- worse
+    -- a *different* binary model, silently. The refusal therefore sits after
+    the common PINT parse, which is what identifies the family, and before a
+    pulsar exists; this asserts that ordering rather than just the message, by
+    making any tempo2 call an error.
+    """
+    from vela_jax import read_tempo2
+    from vela_jax.errors import Tempo2Error
+
+    par, tim = ddr_fixture
+
+    def explode(*args, **kwargs):  # pragma: no cover - must not be reached
+        raise AssertionError("tempo2 was invoked for a BINARY DDR par")
+
+    monkeypatch.setattr(read_tempo2, "load_pulsar", explode)
+    with pytest.raises(Tempo2Error, match="does not implement BINARY DDR"):
+        read_tempo2.load(par, tim)
+
+    with pytest.raises(Tempo2Error, match="timing_package='pint'"):
+        Engine.from_files(par, tim, timing_package="tempo2")

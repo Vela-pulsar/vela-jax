@@ -62,8 +62,10 @@ RESIDUAL_CENTERING = ResidualCentering(
 
 #: Parameters whose absolute value cannot be reconstructed from a float64 fit
 #: coordinate at the precision the engine works to (SPEC §4.7).
+#: ``TGEO`` is here even though freeze refuses a free one: every epoch is
+#: unsafe as an absolute float64 coordinate.
 _PRECISION_CRITICAL = frozenset(
-    {"F0", "PEPOCH", "POSEPOCH", "DMEPOCH", "T0", "TASC", "PB", "FB0"}
+    {"F0", "PEPOCH", "POSEPOCH", "DMEPOCH", "T0", "TASC", "TGEO", "PB", "FB0"}
 )
 
 #: Parameters whose delay is affine in the parameter (up to the second-order

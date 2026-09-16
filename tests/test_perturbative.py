@@ -17,6 +17,11 @@ CASES = [
         (("sim_dd", "binary+astrometry"), ()),  # DD: the Kepler difference solve
         (("J2302+4442.sim", "binary+astrometry"), ()),  # DDS: R11.3-1's fixture
         (("sim_ell1k", "binary+astrometry"), ()),  # ELL1k: the validity domain
+        # DDR: the *regular* Kepler difference solve and `Pert.cbrt`, neither
+        # of which any other family exercises. Its fixture freezes astrometry,
+        # so the live set is the binary one; geometry/kinematics are certified
+        # on their own model in `tests/test_ddr.py`.
+        (("sim_ddr", "binary+astrometry"), ()),
         (("NGC6440E", "astrometry"), ()),  # isolated: the astrometry axes alone
         # Breadth over the remaining families.
         (("sim_ddk", "binary+astrometry"), pytest.mark.slow),  # DDK

@@ -1,0 +1,31 @@
+PSR              SIM_DDR
+EPHEM            DE440
+CLOCK            TT(BIPM2021)
+UNITS            TDB
+RAJ              18:00:00.00000000         0
+DECJ             -20:00:00.0000000         0
+PMRA             0.0                       0
+PMDEC            0.0                       0
+PX               0.5                       0
+F0               250.0                     1  1.0e-12
+F1               -1.0e-15                  1  1.0e-22
+PEPOCH           54000.0
+POSEPOCH         54000.0
+DM               10.0                      0
+PLANET_SHAPIRO   N
+BINARY           DDR
+PB               1.0                       1  1.0e-11
+PBDOT            0.0                       0
+A1               5.0                       1  1.0e-7
+TASC             54000.0                   1  1.0e-9
+EPS1             0.02                      1  1.0e-7
+EPS2             -0.03                     1  1.0e-7
+M2               0.8                       1  1.0e-4
+COSI             0.5                       1  1.0e-4
+DDRPK            Y
+DDRPBDOT         absorb_gw
+DDRGEO           N
+DDRKINE          N
+TZRMJD           54000.0
+TZRFRQ           1400.0
+TZRSITE          @

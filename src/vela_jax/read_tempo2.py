@@ -506,6 +506,17 @@ def load(par, tim, *, pulsar=None, **pulsar_kwargs):
         )
     tempo2_text, pint_text, source_units = prepare_par(par)
     model = get_model(io.StringIO(pint_text))
+    # tempo2 has no DDR model at all. Refuse by name here -- after the common
+    # PINT parse, which is what identifies the family, and *before* a pulsar is
+    # constructed -- so the failure is this sentence rather than an opaque
+    # parser error or, worse, a silently different binary model.
+    if (
+        model["BINARY"].value is not None
+        and str(model["BINARY"].value).upper() == "DDR"
+    ):
+        raise Tempo2Error(
+            "tempo2 does not implement BINARY DDR; use timing_package='pint'"
+        )
     if pulsar is None:
         pulsar = load_pulsar(tempo2_text, tim, **pulsar_kwargs)
 

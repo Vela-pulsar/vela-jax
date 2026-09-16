@@ -512,3 +512,303 @@ def test_dmdata_is_bookkeeping_not_a_delay(examples, tmp_path):
         examples / "sim_dmx.tim",
     )
     assert engine.toa_count > 0
+
+
+# --- DDR: build-time refusals and parameter accountability -----------------
+#
+# Mode flags, galaxy constants and the frozen ``TGEO`` epoch are all resolved
+# once at build. Everything that can go out of domain while *sampling* is a
+# traced mask instead and lives in ``tests/test_ddr.py``.
+
+DDR_MODEL_PAR = """\
+PSR              SIMDDRCHK
+EPHEM            DE440
+CLOCK            TT(BIPM2021)
+UNITS            TDB
+RAJ              18:00:00.00000000         0
+DECJ             -20:00:00.0000000         0
+PMRA             3.0                       0
+PMDEC            -5.0                      0
+PX               1.2                       0
+F0               250.0                     1  1.0e-12
+F1               -1.0e-15                  1  1.0e-22
+PEPOCH           55000.0
+POSEPOCH         55000.0
+PLANET_SHAPIRO   N
+BINARY           DDR
+PB               1.0                       0
+A1               5.0                       1  1.0e-7
+TASC             55000.0                   1  1.0e-9
+EPS1             0.02                      1  1.0e-7
+EPS2             -0.03                     1  1.0e-7
+M2               0.8                       1  1.0e-4
+COSI             0.5                       1  1.0e-4
+KOM              30.0                      1  1.0e-2
+DDRPK            Y
+DDRPBDOT         kinematic
+DDRGEO           Y
+DDRKINE          Y
+TZRMJD           55000.0
+TZRFRQ           1400.0
+TZRSITE          gbt
+"""
+
+
+def _ddr_model(**mutations):
+    """A valid geometry-on DDR model, mutated *after* PINT's own validation.
+
+    PINT refuses most invalid flag combinations while parsing, so a text par
+    cannot reach the engine's resolver for them. Mutating the parsed model is
+    how the engine-side refusal gets exercised at all -- and it has to be
+    exercised: PINT refusing first today is not a guarantee it will tomorrow.
+    """
+    import io
+
+    from pint.models import get_model
+
+    model = get_model(io.StringIO(DDR_MODEL_PAR))
+    for name, value in mutations.items():
+        if value is None:
+            _unset(model, name)
+        else:
+            model[name].value = value
+    return model
+
+
+def _unset(model, name) -> None:
+    """Clear a parameter the way a par that omitted it would have.
+
+    Both PINT setters refuse to discard an existing quantity, and several of
+    these fields cannot be left out of a *parseable* DDR par at all -- PINT's
+    own validation demands them first. SPEC §11 still wants the engine-side
+    refusal exercised, on the grounds that PINT refusing first today is not a
+    guarantee about tomorrow, so the backing slot is cleared directly.
+    """
+    model[name]._quantity = None
+
+
+def _resolve(model, *, use_fbx=False, ecliptic=False):
+    from vela_jax.binary import resolve_ddr_config
+    from vela_jax.constants import OBL
+
+    return resolve_ddr_config(model, use_fbx=use_fbx, ecliptic=ecliptic, obliquity=OBL)
+
+
+@pytest.mark.unit
+def test_a_valid_ddr_model_resolves_its_six_static_flags():
+    config = _resolve(_ddr_model())
+    assert (config.use_fbx, config.use_pk) == (False, True)
+    assert (config.pbdot_kinematic, config.use_geo, config.use_kine) == (
+        True,
+        True,
+        True,
+    )
+    assert config.ecliptic_coordinates is False
+
+
+@pytest.mark.unit
+def test_an_unknown_ddrpbdot_mode_is_refused():
+    with pytest.raises(UnsupportedModelError, match="DDRPBDOT"):
+        _resolve(_ddr_model(DDRPBDOT="quadrupole"))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mutations", [{"DDRKINE": False}, {"DDRPBDOT": "kinematic"}])
+def test_fbx_refuses_a_kinematic_or_shklovskii_pbdot(mutations):
+    """The FBX chart encodes the whole phase in ``FBn``; a second source is a
+    double count."""
+    base = {"DDRPBDOT": "absorb_gw", "DDRKINE": False, "DDRGEO": False}
+    base.update(mutations)
+    if base["DDRPBDOT"] == "absorb_gw" and not base["DDRKINE"]:
+        pytest.skip("this combination is the legal one")
+    with pytest.raises(UnsupportedModelError, match="FBX"):
+        _resolve(_ddr_model(**base), use_fbx=True)
+
+
+@pytest.mark.unit
+def test_fbx_with_a_kinematic_pbdot_is_refused():
+    with pytest.raises(UnsupportedModelError, match="FBX"):
+        _resolve(_ddr_model(DDRPBDOT="kinematic", DDRKINE=False), use_fbx=True)
+
+
+@pytest.mark.unit
+def test_fbx_with_kinematics_on_is_refused():
+    with pytest.raises(UnsupportedModelError, match="FBX"):
+        _resolve(_ddr_model(DDRPBDOT="absorb_gw", DDRKINE=True), use_fbx=True)
+
+
+@pytest.mark.unit
+def test_geometry_without_kinematics_is_refused_in_the_pb_chart():
+    with pytest.raises(UnsupportedModelError, match="DDRGEO"):
+        _resolve(_ddr_model(DDRGEO=True, DDRKINE=False))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("px", [None, 0.0, -1.0])
+def test_geometry_or_kinematics_without_a_positive_parallax_is_refused(px):
+    model = _ddr_model()
+    if px is None:
+        _unset(model, "PX")
+    else:
+        model["PX"].value = px
+    with pytest.raises(UnsupportedModelError, match="PX"):
+        _resolve(model)
+
+
+@pytest.mark.unit
+def test_geometry_without_kom_is_refused():
+    model = _ddr_model()
+    _unset(model, "KOM")
+    with pytest.raises(UnsupportedModelError, match="KOM"):
+        _resolve(model)
+
+
+@pytest.mark.unit
+def test_a_missing_required_parameter_is_named():
+    model = _ddr_model()
+    _unset(model, "COSI")
+    with pytest.raises(UnsupportedModelError, match="COSI"):
+        _resolve(model)
+
+
+@pytest.mark.unit
+def test_ggamma_is_required_only_when_the_gr_maps_are_off():
+    """``DDRPK Y`` derives ``g_gamma``; ``DDRPK N`` reads it."""
+    model = _ddr_model(DDRPK=True)
+    assert model["GGAMMA"].quantity is None
+    _resolve(model)  # builds: the GR map supplies g_gamma
+
+    model = _ddr_model(DDRPK=False)
+    _unset(model, "GGAMMA")
+    with pytest.raises(UnsupportedModelError, match="GGAMMA"):
+        _resolve(model)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "name,default",
+    [
+        ("DDRR0", 8.178),
+        ("DDRTHETA0", 220.0),
+        ("DDRRHO0", 0.10),
+        ("DDRZ0", 180.0),
+        ("DDRZSUN", 20.0),
+    ],
+)
+def test_the_galaxy_constants_are_pinned_at_their_defaults(name, default):
+    """The physics uses Vela's already-converted literals, so a par that moves
+    one of these would be silently ignored -- which is what ``PINNED_PARAMS``
+    exists to refuse."""
+    from vela_jax.freeze import PINNED_PARAMS, account_for_parameters
+
+    assert PINNED_PARAMS[name] == default
+
+    model = _ddr_model()
+    consumed = set(model.params) - {name}
+    account_for_parameters(model, None, consumed)  # at the default: accepted
+
+    model[name].value = default * 1.5
+    with pytest.raises(UnsupportedModelError, match=name):
+        account_for_parameters(model, None, consumed)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["EDOT", "EPS1DOT", "EPS2DOT", "DR", "DTH"])
+def test_the_unsupported_placeholders_are_inert_at_zero_and_refused_otherwise(name):
+    from vela_jax.freeze import account_for_parameters
+
+    model = _ddr_model()
+    consumed = set(model.params) - {name}
+
+    model[name].value = 0.0
+    account_for_parameters(model, None, consumed)
+
+    model[name].value = 1e-12
+    with pytest.raises(UnsupportedModelError, match=name):
+        account_for_parameters(model, None, consumed)
+
+
+@pytest.mark.unit
+def test_a_free_tgeo_is_refused():
+    """``TGEO`` is the frozen origin of the projector; the freeze owns it."""
+    from vela_jax.freeze import validate_model
+
+    model = _ddr_model()
+    validate_model(model)
+    model["TGEO"].frozen = False
+    with pytest.raises(UnsupportedModelError, match="TGEO"):
+        validate_model(model)
+
+
+@pytest.mark.unit
+def test_a_materialised_tgeo_passes_accountability_with_geometry_off():
+    """PINT sets ``TGEO = TASC`` whether or not geometry reads it.
+
+    ``ddr_consumed`` correctly leaves ``TGEO`` out with geometry off, so
+    without the ``INERT_PARAMS`` classification a perfectly ordinary
+    geometry-off DDR par would fail accountability on a nonzero epoch it never
+    uses.
+    """
+    from vela_jax.binary import ddr_consumed
+    from vela_jax.freeze import INERT_PARAMS, account_for_parameters
+
+    assert "TGEO" in INERT_PARAMS
+
+    model = _ddr_model(DDRGEO=False, DDRKINE=False, DDRPBDOT="absorb_gw")
+    _unset(model, "KOM")
+    config = _resolve(model)
+    assert "TGEO" not in ddr_consumed(config)
+    assert model["TGEO"].quantity is not None
+    assert model["TGEO"].value != 0.0
+    account_for_parameters(
+        model, None, ddr_consumed(config) | set(model.params) - {"TGEO"}
+    )
+
+
+@pytest.mark.unit
+def test_ddr_consumes_only_what_its_selected_modes_read():
+    """R5.3b: a static union over every mode would claim an inactive field
+    reaches the trace."""
+    from vela_jax.binary import ddr_consumed
+    from vela_jax.binary.ddr import DDRConfig
+
+    def config(**kwargs):
+        flags = dict(
+            use_fbx=False,
+            ecliptic_coordinates=False,
+            use_pk=True,
+            pbdot_kinematic=False,
+            use_geo=False,
+            use_kine=False,
+            obliquity=0.4,
+        )
+        flags.update(kwargs)
+        return DDRConfig(**flags)
+
+    plain = ddr_consumed(config())
+    assert {"A1", "A1DOT", "TASC", "EPS1", "EPS2", "M2", "COSI"} <= plain
+    assert "COSI" in plain  # always, in every mode
+    assert "PB" in plain and "PBDOT" in plain
+    assert not {"XPBDOT", "GGAMMA", "OMDOT", "PX", "TGEO", "KOM"} & plain
+
+    assert "XPBDOT" in ddr_consumed(config(pbdot_kinematic=True))
+    assert "PBDOT" not in ddr_consumed(config(pbdot_kinematic=True))
+    assert {"GGAMMA", "OMDOT"} <= ddr_consumed(config(use_pk=False))
+
+    kine = ddr_consumed(config(use_kine=True))
+    assert {"PX", "TGEO", "POSEPOCH", "RAJ", "DECJ", "PMRA", "PMDEC"} <= kine
+    assert "KOM" not in kine
+    ecliptic = ddr_consumed(config(use_kine=True, ecliptic_coordinates=True))
+    assert {"ELONG", "ELAT", "PMELONG", "PMELAT"} <= ecliptic
+    assert not {"RAJ", "DECJ"} & ecliptic
+    assert "KOM" in ddr_consumed(config(use_geo=True, use_kine=True))
+
+    fbx = ddr_consumed(config(use_fbx=True))
+    assert "FB0" in fbx and "PB" not in fbx and "PBDOT" not in fbx
+
+
+@pytest.mark.unit
+def test_the_ddr_mode_flags_are_inert_parameters():
+    from vela_jax.freeze import INERT_PARAMS
+
+    assert {"DDRPK", "DDRPBDOT", "DDRGEO", "DDRKINE"} <= INERT_PARAMS

@@ -1,6 +1,6 @@
 # vela-jax — Vela.jl's timing-delay engine, in JAX
 
-**Status:** normative specification v2.5 (2026-09-05). **Self-contained**: this
+**Status:** normative specification v2.6 (2026-09-16). **Self-contained**: this
 document supersedes the v0.2 design draft entirely. No earlier draft is
 normative.
 
@@ -22,6 +22,25 @@ EPTA/IPTA par that says `IERS2003`. Fixtures that set `A0`/`B0`/`DMX` set
 them at zero, which the zero-skip accepts; a non-zero unimplemented term is
 what a parity pass cannot see. §5.3b closes the class; §7.3 resolves the
 obliquity from the par instead of hard-coding Vela's.
+
+**v2.6 adds `BINARY DDR` as the eighth binary family.** DDR is a third
+Kepler convention beside DD and ELL1, not a DD subtype: it solves the
+*regular* Laplace-Lagrange equation `F − k sin F + h cos F = λ` in native
+`(EPS1, EPS2, TASC)` coordinates and advances periapsis through a regular
+`q = ν − M`. Four things follow, and each is normative below: a fixed 16-pass
+solver with an implicit-function JVP (§7.10b) because a traced array cannot
+break out of Vela's 64-step loop; a **traced** validity mask (§7.10b), because
+DDR's physical domain is derived from sampled parameters rather than frozen
+ones, which makes `numerics.where`'s condition traced for the first time
+(§11.3); the perturbative substrate gains `cbrt`, `regular_kepler` and
+`nan_where` (§11.4); and R4.5/R4.5b apply to DDR's periodic longitude and
+secular precession exactly as they do to DD's true anomaly (§4.5). DDR is
+**PINT-host-only** — tempo2 has no such model and `Engine.from_tempo2`
+refuses it by name (§1.2). DDR does **not** claim nltiming's DD
+polar-to-Laplace chart: `BinaryFacts` gains `supports_domain`, and DDR reports
+`kepler_convention="ddr"`, `epoch_shift_exact=False`, `supports_domain=False`
+(§9). Unlike Vela's DDR, this one rotates its geometry with the par's resolved
+`ECL` (§7.3's rule, applied in §7.10b), which PINT gates.
 
 **v2.5.** A.6.1 is a freeze comparison: `Engine.residuals()` on two
 timing-package reads of the same files, not `PINT.Residuals` vs libstempo.
@@ -308,6 +327,17 @@ it), wideband TOAs and DM residuals, `Glitch`, `ChromaticCM/CMX`,
 astrometry, DDK with H3/STIGMA, DDK with `K96 N`. Each refusal raises
 `UnsupportedModelError` naming the offending component and the supported set.
 
+`BINARY DDR` is supported, but **only with PINT as the timing package**:
+tempo2 implements no DDR model, so `read_tempo2.load` refuses by name after
+the common PINT parse and *before* a libstempo pulsar is constructed. Letting
+it through would end either in an opaque parser failure or, worse, in a
+silently different binary model. DDR's own build-time refusals — an unknown
+`DDRPBDOT`, FBX with a kinematic or Shklovskii `Pbdot`, `DDRGEO Y` without
+`DDRKINE Y` in the PB chart, geometry or kinematics without `PX > 0`,
+`DDRGEO Y` without `KOM`, a free `TGEO`, a non-default galaxy constant, a
+non-zero `EDOT`/`EPS1DOT`/`EPS2DOT`/`DR`/`DTH` — are all build errors too
+(§7.10b).
+
 Refused **by value**, not by component, under R5.3b: `SWM 1`/`SWM 2` (PINT's
 You et al. 2007 solar wind; Vela has only the spherical model), wideband TOAs
 (the tim carrying DM measurements — the freeze reads the narrowband columns,
@@ -340,6 +370,8 @@ facility the consumers never read (B.3.6).
 | DD family, inverse timing formula | Vela | `binary_dd_base.jl`, `binary_dd.jl`, `binary_ddh.jl`, `binary_dds.jl` |
 | ELL1 family | Vela | `binary_ell1_base.jl`, `binary_ell1.jl`, `binary_ell1h.jl`, `binary_ell1k.jl` |
 | DDK | Vela | `binary_ddk.jl` |
+| DDR | Vela | `binary_ddr.jl` (`feat/ddr-model`, fcf7134) |
+| DDR schema, and an independent numerical oracle | PINT | `pint/models/binary_ddr.py`, `stand_alone_psr_binaries/DDR_model.py` |
 | Spindown, PhaseOffset, PhaseJump | Vela | `spindown.jl`, `phase_offset.jl`, `jump.jl` |
 | Parameter units, epochs, F0 split, `fix_params` | pyvela | `pyvela/parameters.py`, `pyvela/model.py` |
 | Obliquity of the ecliptic per `ECL` realisation | PINT | `pint/data/runtime/ecliptic.dat`, read at build — **not** copied |
@@ -541,11 +573,25 @@ moves late-time orbital phase) and float64-safe because `n` is exact and
 `δPB` small. If T0/TASC is live, `Δt_red` shifts by `−δE·86400` and nothing
 else changes; no re-reduction inside the trace is ever needed.
 
+**R4.5 for DDR.** DDR's mean longitude is reduced by the same two identities,
+with `E = TASC` and `Δt_red = dt_red − delay − δTASC`. A frozen `TASC` makes
+`δTASC` zero, so omitting that term is silent until `TASC` is live — which
+§12's T13 deliberately perturbs. Vela forms the absolute orbit count in
+float64 and reduces it inside its solver instead, which loses phase before the
+reduction; this is a precision improvement over Vela and is gated at
+`n_orb = 10⁴`.
+
 **R4.5b (the unwrapped true anomaly).** The reduction removes the orbit count
 from the eccentric/true anomaly, but `ω = OM + (OMDOT/n̂)·v` is *secular* in
 `v`, not periodic: the count MUST be restored (`v + 2π·n_orb`) before the
 OMDOT advance. Missing this was a **2.7 ms** error on `J0955-6150`; with it,
 2.4 ps.
+
+**R4.5b for DDR.** The same rule, in DDR's coordinates: `λ` as returned by the
+reduced helpers is periodic, and only `precession_delta` reads the restored
+`λ_secular = λ + 2π·n_orb`. Omitting the restoration at `n_orb = 10⁴` moves
+the precession angle by `κ·2π·n_orb ≈ 0.129 rad` and the Roemer delay by
+≈ 0.64 s on the §12 DDR anchor model.
 
 ### 4.6 TZR
 
@@ -558,7 +604,10 @@ Stages Vela zeroes for TZR (`PhaseOffset`, `PhaseJump`,
 ### 4.7 Precision-critical parameters (R4.7)
 
 `precision_critical_params()` returns `{F0, PEPOCH, POSEPOCH, DMEPOCH, T0,
-TASC, PB, FB0} ∩ param_names`. Callers MUST keep `reference_theta_exact()`
+TASC, TGEO, PB, FB0} ∩ param_names`. `TGEO` is listed although a valid DDR
+model cannot free it (the freeze refuses that): this set is what the exact
+metadata publishes as "unsafe as an absolute float64 coordinate", and every
+epoch belongs in it. Callers MUST keep `reference_theta_exact()`
 strings and apply deltas additively; inside the engine every parameter enters
 as `θ★ + δ` with `θ★` folded into frozen constants, so there is no
 `(θ+δ) − θ` cancellation anywhere.
@@ -837,7 +886,7 @@ No `efac`/`equad2` fields — noise belongs to Discovery/Enterprise.
 | 2 | `SolarWindDispersion` (if `NE_SW` present, not frozen-zero) | `solar_wind` | required |
 | 3 | `DispersionDM` | `dispersion_taylor` | required |
 | 4 | `DispersionDMX` | `dispersion_piecewise` | required |
-| 5 | `Binary*` (ELL1, ELL1H, ELL1k, DD, DDH, DDS, DDK) | `binary.<family>` | required if `BINARY` |
+| 5 | `Binary*` (ELL1, ELL1H, ELL1k, DD, DDH, DDS, DDK, DDR) | `binary.<family>` | required if `BINARY` |
 | 6 | `FD` | `frequency_dependent` | required |
 | 7 | `FDJump` (`FDJUMPLOG Y` only) | `frequency_dependent_jump` | required |
 | 8 | `Spindown` | `spindown` | required |
@@ -1116,6 +1165,86 @@ Build-time checks: astrometry stage present; `ssb_psr_pos` populated before
 the binary (order); H3/STIGMA absent; `K96 N` refused (Vela always applies
 the PM terms). `ecliptic` follows the astrometry component.
 
+### 7.10b DDR (`binary_ddr.jl`)
+
+The eighth family, and the third Kepler convention. `binary/ddr.py` is a
+line-by-line translation of Vela's `binary_ddr.jl`; `docs/CONFORMANCE.md`
+carries the source map and the complete deviation list. Normatively:
+
+**Coordinates and solver.** Native `(EPS1, EPS2, TASC)` with `h = EPS1`,
+`k = EPS2`, and the regular Laplace-Lagrange equation
+
+```
+F − k sin F + h cos F = λ
+```
+
+solved by Vela's Newton-with-bisection-bracket update. The bracket moves only
+when bisection is used — it is Vela's and PINT's update, not a generic Newton
+loop. Because a traced array cannot break on convergence, the loop count is a
+**constant 16**, justified by measurement rather than assertion: a
+two-million-point fixed-seed disk probe over `√(h²+k²) ≤ 0.99` has a maximum
+first-converged **0-based loop index of 8** (the 9th pass) at 22 points and
+never fails within 64, so 16 retains seven unused passes while avoiding four
+times the transcendental work of a literal 64-step unroll. The probe recipe,
+the retained worst cases and the measured cost live in `docs/PARITY.md` and
+`tests/test_ddr_performance.py`; the loop count MUST NOT be changed without
+re-deriving them.
+
+Differentiation is an **implicit-function custom JVP**,
+
+```
+dF = (dλ + sin F·dk − cos F·dh) / (1 − k cos F − h sin F),
+```
+
+so no branch predicate and no data-dependent convergence history is ever
+differentiated. Convergence is reported from the plain float64 *reference*
+channel (R11.3-0).
+
+**Modes.** Six static booleans, resolved once after PINT's `setup()` into a
+frozen `DDRConfig` and bound into the stage closure: `use_fbx`,
+`ecliptic_coordinates`, `use_pk`, `pbdot_kinematic`, `use_geo`, `use_kine`,
+plus the resolved obliquity. No mode is ever a traced predicate, and the stage
+MUST NOT inspect a PINT model.
+
+**Consumed parameters are mode-dependent** (R5.3b). A static union over every
+mode would claim that an inactive-mode field reaches the trace. `DDRPK`,
+`DDRPBDOT`, `DDRGEO` and `DDRKINE` are `INERT_PARAMS`, like `PLANET_SHAPIRO`;
+the five galaxy constants are `PINNED_PARAMS` at Vela's/PINT's defaults, since
+the physics uses Vela's already-converted literals and a par that moved one
+would otherwise be ignored in silence. `TGEO` is **both** consumed (when
+geometry or kinematics is on) and inert — PINT's `BinaryDDR.setup()`
+materialises `TGEO = TASC` unconditionally, so without the inert
+classification an ordinary geometry-off DDR par would fail accountability on
+an epoch it never reads. This is the existing `POSEPOCH` pattern.
+
+**Geometry uses the engine's resolved obliquity.** Vela's DDR hard-codes
+IERS2010; §7.3's rule applies here too, with the same value `solar_system`
+rotates the line of sight with and the same rotations DDK already uses. The
+deviation has a measurable physics consequence, so it is gated against PINT —
+which honours `ECL` — as a *movement* between two obliquities on one frozen
+pre-binary correction.
+
+**Domain: build-time where it can be, traced where it cannot.** Missing
+parameters, impossible flag combinations, non-default galaxy constants,
+non-zero unsupported placeholders and a free `TGEO` are **build** errors.
+Quantities that can leave the physical domain while *sampling* — `COSI`,
+the inferred pulsar mass, an evolved `A1`, the phase slope `λ̇`, and the
+Shapiro argument `B_S` — are an elementwise `valid` mask on `DDRState`, and
+the stage returns NaN delay *and* NaN doppler at those rows. The rule is
+"substitute, then select": a safe value MUST be substituted before every
+singular square root, division, cube root and logarithm, and `valid` MUST be
+updated before each substitution and never derived from a value that was
+already replaced. In particular the fallback MUST NOT be spelled
+`0.0 * value + fallback`, because exactly where `value` is NaN, `0.0 · NaN`
+is still NaN.
+
+`valid` is an `R = N + 1` mask, so an invalid **TZR** row NaNs every residual
+through the phase offset even when every science TOA is inside the domain;
+domain tests MUST treat the TZR row as its own crossing.
+
+Converting a non-finite residual to a `−inf` log density belongs to
+Discovery/nltiming. This package returns NaN and adds no likelihood layer.
+
 ### 7.11 `spindown` — §4.4. `phase_offset`, `phase_jump` (`phase_offset.jl`, `jump.jl`)
 
 ```python
@@ -1246,14 +1375,24 @@ Behavioural rules:
 ```python
 @dataclass(frozen=True)
 class BinaryFacts:
-    family: str                  # "ELL1" | "ELL1H" | "ELL1k" | "DD" | "DDH" | "DDS" | "DDK"
-    kepler_convention: str       # "dd" for the DD family, "ell1" otherwise
+    family: str                  # "ELL1" | "ELL1H" | "ELL1k" | "DD" | "DDH" | "DDS" | "DDK" | "DDR"
+    kepler_convention: str       # "dd" | "ell1" | "ddr"
     use_fbx: bool
-    shapiro: str                 # "m2_sini" | "h3_stig" | "shapmax" | "kin"
-    epoch_shift_exact: bool
+    shapiro: str                 # "m2_sini" | "h3_stig" | "shapmax" | "kin" | "m2_cosi"
+    epoch_shift_exact: bool      # False for DDR: its epoch convention is its own
     secular_terms: tuple[str, ...]
-    ell1_t2: bool                # A.4 truncation active
+    ell1_t2: bool = False        # A.4 truncation active
+    supports_domain: bool = True # False for DDR (§7.10b)
 ```
+
+`supports_domain` answers "does a valid box prior on this family's independent
+inputs guarantee a physical state?". Seven families say yes and keep the
+default; DDR says no, because a sampled `(A1, PB, M2, COSI)` can imply a
+negative pulsar mass or a non-positive Shapiro `B_S`. `binary_chart_capability`
+forwards `kepler_convention`, `epoch_shift_exact`, `secular_terms`,
+`origin_certified` and `supports_domain` — **not** `shapiro`, which is
+inventory only. nltiming MUST NOT apply its DD polar-to-Laplace chart to a
+family reporting `kepler_convention="ddr"`.
 
 ## 10. nltiming interface
 
@@ -1352,8 +1491,17 @@ It never evaluates the full pipeline absolutely in the trace.
 ```
 astrometry:  RAJ DECJ | ELONG ELAT, PMRA PMDEC | PMELONG PMELAT, PX
 binary:      A1 PB|FB0 ECC OM T0 | EPS1 EPS2 TASC, SINI M2 | H3 STIGMA | SHAPMAX,
-             KIN KOM, GAMMA, OMDOT PBDOT EDOT A1DOT EPS1DOT EPS2DOT LNEDOT
+             KIN KOM, GAMMA, OMDOT PBDOT EDOT A1DOT EPS1DOT EPS2DOT LNEDOT,
+             COSI GGAMMA XPBDOT                                    (DDR)
 ```
+
+`TGEO` is frozen metadata, not an axis, and DDR's static mode flags and galaxy
+constants are not axes either. The companion registry in
+`nltiming.hybrid.BINARY_AXES` MUST gain `COSI` and `GGAMMA` (`XPBDOT` is
+already there), and `COSI` MUST get the signed physical domain `(-1, 1)` so a
+sampled prior matches Vela/pyvela's isotropic `Uniform(-1, 1)`. The engine
+still enforces the strict `|COSI| < 1`: a sampled endpoint has zero measure
+and returns the documented invalid-state NaN rather than being clamped.
 
 Named modes (aligned with nltiming's `nonlinear_params` vocabulary, R10.3):
 `"binary"` (binary only), `"binary+"` (adds PX), `"binary+astrometry"` (adds
@@ -1362,6 +1510,19 @@ never perturbative-live (identically linear, or linear far below fp32
 resolution for a PTA MSP); requesting them raises.
 
 ### 11.3 Delta-formulation rules (R11.3)
+
+0. **`numerics.where`'s condition MAY be traced** (new in v2.6). Before DDR it
+   was always a frozen boolean array. DDR's physical domain is derived from
+   *sampled* parameters, so its validity predicate is evaluated from
+   `ref + delta` under `Pert`. A `Numeric` implementation MUST therefore apply
+   the chosen branch consistently to every channel it carries, and a caller
+   MUST still substitute a safe value *before* the singular expression rather
+   than selecting a NaN away afterwards — an unselected NaN poisons `jacfwd`
+   whether or not its branch is taken. `Pert.value` (`ref + delta`) MAY be
+   formed for such a predicate or for reporting, never for arithmetic in the
+   perturbation channel; solver convergence specifically reads
+   `Pert.reference`, because the difference solve is deliberately
+   float32-capable and cannot meet a float64-epsilon residual bound.
 
 1. **The reference channel is float64, always.** `Pert.ref` (§11.5) is
    evaluated in float64 regardless of the working dtype. The reference
@@ -1397,6 +1558,14 @@ resolution for a PTA MSP); requesting them raises.
 Δkepler     : u′ − e′sin u′ = l′ solved IN THE DIFFERENCE VARIABLE x = u′ − u★:
               x − e′[sin u★(cos x − 1) + cos u★ sin x] = Δl + δe·sin u★,
               Newton from the linear guess, 4 fixed iterations
+Δcbrt A     = ΔA / (b² + ab + a²),  a = ∛A★, b = ∛A′   — never ∛A′ − ∛A★
+Δregular_kepler : F′ − k′sin F′ + h′cos F′ = λ′, again in x = F′ − F★,
+              4 fixed Newton iterations; the reference solve is the fp64
+              16-pass kernel of §7.10b
+nan_where(valid, ·) : NaN in EVERY channel where ¬valid. `select(valid, ·, nan)`
+              is not equivalent — lifting a scalar NaN gives it a *zero*
+              perturbation, so `delay_delta` would report an invalid sampled
+              point as no change at all
 ```
 
 ### 11.5 The dual (R11.5) — one physics, two channels
@@ -1462,9 +1631,9 @@ Carried gates (v1, measured status in `docs/PARITY.md` / `CONFORMANCE.md`):
 | T10 | trace never calls PINT (monkeypatch during jit) | — | passes |
 | T11 | par with noise lines builds; residuals bitwise identical to pre-stripped par | self | bitwise |
 | T12 | live T0/TASC/PB vs pyvela | pyvela | ≤ 1 ns |
-| T13 | orbit-count reduction vs unreduced at n_orb = 10⁴ | self | reduced floor ≤ 0.05 ps |
+| T13 | orbit-count reduction vs unreduced at n_orb = 10⁴ | self | reduced floor ≤ 0.05 ps. **DDR PB chart: met. DDR FBX chart: ≈ 16 ps**, and the excess is one named rounding — `FB0·P★` rounds to exactly 1.0, so the retained-integer bracket `n_orb·(FB0·P★ − 1)` evaluates to zero against a true ~5·10⁻¹⁷. This is the reduction identity's own floor, shared verbatim with `binary.orbit.mean_anomaly` and every FBX family; the gate asserts the error **is** that term rather than loosening a bound |
 | T14 | perturbative fp64 vs full engine | self | ≤ 10⁻¹² s |
-| T15 | perturbative fp32 vs full engine, **full fixture set incl. J2302+4442** (R11.3 rule 1) | fp64 parent | rtol 10⁻⁵, atol 10⁻¹² s; Jacobian 10⁻⁴ |
+| T15 | perturbative fp32 vs full engine, **full fixture set incl. J2302+4442** (R11.3 rule 1) **and `sim_ddr`** | fp64 parent | rtol 10⁻⁵, atol 10⁻¹² s; Jacobian 10⁻⁴ |
 | T16 | fp32 engine inside a Discovery fp32 likelihood (smoke) | Discovery | NUTS runs; SINI/M2 posterior matches fp64 within MC error |
 
 New gates (v2):
@@ -1483,6 +1652,19 @@ New gates (v2):
 | S4 | A.6.3 libstempo, ELL1+FD, discriminating eccentricity | libstempo | RMS ≤ 50 ns under `"tempo2"` conventions; MUST fail under `"pint"` |
 | N1 | nltiming installed: protocols by `isinstance`, `validate_engine_against_pulsar`, gauge assert, `TimingSpec.for_pulsar` end-to-end, hybrid manifest check | nltiming | passes; **a CI job with nltiming installed is mandatory** — a structural twin guarded only by an optional test is unguarded |
 | P7 | R5.3b: a non-zero unconsumed parameter is refused by name (`A0`, `B0`, `SWM 1`, wideband); frozen bare `DMX` is inert; `ECL` is read and moves the residual as PINT's does | PINT | refuses by name; `ECL` agreement ≤ 0.1% of the shift it causes |
+
+DDR gates (v2.6):
+
+| # | Gate | Oracle | Budget |
+|---|---|---|---|
+| D1 | Vela's own scalar delay anchors, PK / phenomenological / FBX charts, plus `mp`, `g_gamma` and the derived `κ` | Vela `test_ddr.jl` | 1 ps absolute (measured ≤ 1·10⁻¹⁵ s) |
+| D2 | Vela's injected-`(I, J)` geometry anchors and its piecewise kinematic `Pbdot` (`p`, `p_shk`, `p_gal`, `p_gw`) | Vela `test_ddr.jl` | 1 ps; relative 10⁻¹⁰ for the `Pbdot` pieces |
+| D3 | the derived TGEO triad — real equatorial geometry — against PINT's own DDR kernel on one frozen pre-binary correction | PINT | 1 ps |
+| D4 | `ECL` **movement**: two obliquities, one frozen pre-binary correction passed identically to both engines and both PINT components | PINT | fixture must move materially; agreement 1 ps |
+| D5 | invalid sampled domain returns NaN and does not raise, under `jit`; `jacfwd` at a valid reference stays finite; an invalid **TZR** row NaNs every residual on its own | self | NaN, never an exception |
+| D6 | the 16-pass solver converges on the committed stress grid and on the 2·10⁶-point probe; the retained 22 worst cases still first converge at 0-based index 8 | self | every point by index 15 |
+| D7 | cost: 16-step vs a 64-step twin (primal), the implicit JVP vs one primal solve, the solver vs compiled `mikkola`, and `binary.DDR` vs `binary.DD` — all on the same 20 000 rows, with the orbital **epoch traced** so the solve is not constant-folded | self | ≤ 35 %, ≤ 2×, ≤ 10×, ≤ 15×; ratios are the gate, wall clock is informational. A 16-vs-64 *gradient* ratio is not measurable: with the implicit rule the derivative cost is independent of the loop count, and a 64-step twin without a custom rule does not compile in six minutes — which is itself the measurement justifying the rule (`docs/PARITY.md`) |
+| D8 | `M2 / M_SUN` mismatch pinned: the layout converts `M2` with PINT's `GMsun/c³` and DDR divides by Vela's literal, which differ by −1.36·10⁻¹⁰ relative | measured | pinned, not silently changed — see `docs/PARITY.md` |
 
 Fixtures: Vela.jl's `pyvela/examples` (`VELA_JAX_FIXTURES`), plus the named
 A.6 fixtures. CI without Julia runs everything but T4/T7/T12 (the `oracle`

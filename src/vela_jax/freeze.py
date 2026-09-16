@@ -100,6 +100,10 @@ ZEROABLE = (
     "M2", "SINI", "PBDOT", "XPBDOT", "A1DOT", "EPS1DOT", "EPS2DOT",
     "H3", "STIGMA", "LNEDOT", "EDOT", "OMDOT", "GAMMA", "DR", "DTH",
 )
+# `GGAMMA` is deliberately absent. PINT's `_finalize_pk_schema` already
+# materialises `GGAMMA = 0` under `DDRPK N`, so a zero-fill here would be
+# redundant for a PINT-built model and would quietly relax
+# `binary.validate_ddr_model` for one assembled without that setup.
 # fmt: on
 
 ALLOWED_COMPONENTS = frozenset(
@@ -122,6 +126,15 @@ ALLOWED_COMPONENTS = frozenset(
 )
 
 
+#: Epochs the ``PEPOCH`` fill above must leave unset. ``ORBWAVE_EPOCH`` belongs
+#: to a component this engine refuses outright -- it is on
+#: :data:`INERT_PARAMS` for exactly that reason -- and PINT's ``BinaryDDR``
+#: refuses a *populated* ``ORBWAVE_EPOCH`` by name. Materialising it would turn
+#: every supported DDR par into a PINT error while changing nothing this chain
+#: reads.
+EPOCH_FILL_EXCLUDED = frozenset({"ORBWAVE_EPOCH"})
+
+
 def prepare_model(model, toas) -> None:
     """pyvela ``fix_params``, delay part only (SPEC §5.3). Mutates ``model``."""
     if model["PEPOCH"].value is None:
@@ -131,6 +144,7 @@ def prepare_model(model, toas) -> None:
         param = model[name]
         if (
             name.endswith("EPOCH")
+            and name not in EPOCH_FILL_EXCLUDED
             and isinstance(param, MJDParameter)
             and param.value is None
         ):
@@ -218,7 +232,7 @@ def validate_model(model) -> None:
             raise UnsupportedModelError("DDK with H3/STIGMA")
         if "K96" in model and model["K96"].value is False:
             raise UnsupportedModelError("DDK with K96 N (Vela always applies PM terms)")
-    for name in ("PEPOCH", "POSEPOCH", "DMEPOCH"):
+    for name in ("PEPOCH", "POSEPOCH", "DMEPOCH", "TGEO"):
         if (
             name in model
             and model[name].quantity is not None
@@ -251,9 +265,14 @@ INERT_PARAMS = {
     # would refuse a par the physics has already consumed.
     "EPHEM", "CLOCK", "UNITS", "TIMEEPH", "T2CMETHOD", "DILATEFREQ",
     "PLANET_SHAPIRO",             # read at build as a static stage flag
+    # DDR mode flags: read once at build, bound into the stage (PLANET_SHAPIRO).
+    "DDRPK", "DDRPBDOT", "DDRGEO", "DDRKINE",
     # consumed by the freeze rather than by a stage
     "PEPOCH", "TZRMJD", "TZRFRQ", "TZRSITE", "BINARY", "FDJUMPLOG",
     "SWEPOCH", "DMEPOCH", "POSEPOCH",
+    # PINT materialises TGEO = TASC; ddr_consumed reads it only for geo/kine.
+    # Inert like POSEPOCH so a geometry-off par still accounts for it.
+    "TGEO",
     "H4",                         # folded into STIGMA by prepare_model
     "CORRECT_TROPOSPHERE",        # relaxation: disabled with a warning (SPEC 1.2)
     # not a delay
@@ -276,6 +295,13 @@ PINNED_PARAMS = {
     # Vela implements the spherical solar wind only (`solarwind.jl`); SWM 1/2
     # is PINT's You et al. (2007) model, which is a different delay.
     "SWM": 0,
+    # DDR Galactic-potential defaults (PINT units). Physics uses the converted
+    # literals in binary/ddr.py; any other value would be silently ignored.
+    "DDRR0": 8.178,
+    "DDRTHETA0": 220.0,
+    "DDRRHO0": 0.10,
+    "DDRZ0": 180.0,
+    "DDRZSUN": 20.0,
 }
 
 

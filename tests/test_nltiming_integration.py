@@ -109,3 +109,57 @@ def test_the_binary_registry_covers_the_engines_live_set(engine_factory, nltimin
     engine = engine_factory("sim_dd")
     live = set(engine.perturbative("binary").live_nonlinear)
     assert {name for name in engine.param_names if is_binary_axis(name)} == live
+
+
+@pytest.fixture(scope="module")
+def ddr_pulsar(ddr_fixture):
+    from vela_jax import Engine
+
+    return TimingPulsar(Engine.from_files(*ddr_fixture))
+
+
+def test_ddr_does_not_claim_the_dd_chart(ddr_pulsar, nltiming):
+    """DDR's native coordinates are its own, and nltiming has to be told.
+
+    ``supports_domain=False`` is the second half: a valid box prior on DDR's
+    independent inputs does not guarantee a physical state, so a consumer that
+    assumed a total domain would treat the engine's NaN as a bug.
+    """
+    engine = ddr_pulsar.timing_engine("vela_jax")
+    capability = engine.binary_chart_capability("kepler_laplace", "")
+    assert capability.kepler_convention == "ddr"
+    assert not capability.epoch_shift_exact
+    assert not capability.supports_domain
+
+
+def test_the_registry_agrees_with_ddrs_live_set(ddr_pulsar, nltiming):
+    """``COSI`` is the axis this would have caught: without the companion
+    registry entry, the hybrid split hands it to the linear path, where no
+    engine evaluates it."""
+    from nltiming.hybrid import is_binary_axis
+
+    engine = ddr_pulsar.engine
+    live = set(engine.perturbative("binary").live_nonlinear)
+    assert "COSI" in live
+    assert {name for name in engine.param_names if is_binary_axis(name)} == live
+
+
+def test_an_invalid_ddr_point_reaches_the_consumer_as_a_non_finite_residual(
+    ddr_pulsar, nltiming
+):
+    """D13: this package returns NaN and stops there.
+
+    Turning a non-finite residual into a ``-inf`` log density is the sampler's
+    job -- Discovery's or nltiming's -- and deliberately not a likelihood layer
+    here. What vela-jax owes the consumer is that the signal arrives at all:
+    NaN, from an ordinary ``residual_delta`` call, without an exception.
+    """
+    engine = ddr_pulsar.timing_engine("vela_jax")
+    fitpars = list(engine.fitpars)
+    delta = np.zeros(len(fitpars))
+    delta[fitpars.index("M2")] = -0.6  # inferred pulsar mass goes negative
+
+    residuals = np.asarray(engine.residual_delta(delta), dtype=float)
+    assert np.all(np.isnan(residuals))
+    # And the reference point is unaffected: the NaN is the sampled point's.
+    assert np.all(np.isfinite(engine.residual_delta(np.zeros(len(fitpars)))))
