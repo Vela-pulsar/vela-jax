@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# The tiers are `make fast` / `make test` / `make full`; see the Makefile for
+# what each one costs.
+#
+# **What CI does and does not cover.** Every job here runs on a bare public
+# runner with the PINT timing package only. The tempo2 timing package needs
+# a libstempo that exposes `siteVel` and the clock-correction fields, which
+# is not on PyPI yet, so the `tempo2` marker -- gates H7, H8 and S4,
+# which between them found all three bugs in the deviation ledger -- runs
+# **locally before merge**, never here. The `oracle` marker (pyvela/Julia)
+# is likewise local for now. A green tick on this file therefore means
+# "the PINT paths are good", and nothing about tempo2.
+#
+# Because a suite that skips everything also reports success, each job below
+# asserts a floor on the number of tests that actually *passed*. A dependency
+# that silently vanishes turns the job red instead of green-and-empty.
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install black ruff
+      - run: black --check src tests examples
+      - run: ruff check src tests examples
+
+  unit:
+    # No par/tim ingest at all, so no fixtures and no ephemeris: this job is
+    # the one that stays fast and green when everything else is unavailable.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: pytest -q -m unit
+
+  default:
+    # The behaviour set: one fixture per binary family. Needs Vela.jl's
+    # examples and, on a cold cache, one astropy ephemeris download.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: abhisrkckl/Vela.jl
+          path: Vela.jl
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - env:
+          VELA_JAX_FIXTURES: ${{ github.workspace }}/Vela.jl/pyvela/examples
+          JAX_ENABLE_X64: "1"
+        run: pytest -q -m "not slow and not oracle and not tempo2" -n auto --dist worksteal
+
+  nltiming:
+    # Gate N1, and it is **mandatory**: this package implements nltiming's
+    # protocols structurally, without importing them. A structural twin whose
+    # only guard is an optional test is not guarded at all -- nothing else in
+    # the tree would notice the shape drifting.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: abhisrkckl/Vela.jl
+          path: Vela.jl
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: pip install 'nltiming @ git+https://github.com/vhaasteren/nltiming'
+      - env:
+          VELA_JAX_FIXTURES: ${{ github.workspace }}/Vela.jl/pyvela/examples
+          JAX_ENABLE_X64: "1"
+        run: |
+          python -c "import nltiming"   # the job fails loudly if it is absent
+          pytest -q tests/test_nltiming_integration.py tests/test_feather.py

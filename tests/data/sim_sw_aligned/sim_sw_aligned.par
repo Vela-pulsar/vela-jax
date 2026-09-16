@@ -1,0 +1,45 @@
+# H7 replacement for Vela sim_sw: MetaPulsar mixed-engine shared par
+# (pint + tempo2 legs on the same files, combination_strategy shared).
+# Keeps ELONG/ELAT; transforms ECL IERS2010 -> IERS2003; PLANET_SHAPIRO N;
+# strips NE_SW1/SWEPOCH; CLK/T2CMETHOD/TIMEEPH/CORRECT_TROPOSPHERE/IPM as
+# the mixed-engine profile. Same original TOAs (clocks already in range).
+# Created: 2026-09-05T12:33:14.626046
+# Format:  PINT
+# By:      MetaPulsar
+PSR                                SIM_SW
+EPHEM                               DE440
+UNITS                                 TDB
+START              54000.9999999475001389
+FINISH             55985.0000000566945255
+DILATEFREQ                              N
+DMDATA                                  N
+NTOA                                 2000
+CHI2                   1895.0765439307224
+CHI2R                  0.9522997708194585
+TRES                0.9688010035121765052
+TZRMJD             55000.0000000000000000
+TZRSITE                               gbt
+TZRFRQ                             1400.0
+PHOFF           0.00011473949932422265 1 3.877904946639033e-06
+PLANET_SHAPIRO                          N
+NE_SW                           3.91565 0
+SWM                                     0
+DM                    14.99999742057219 1
+CLK                          TT(BIPM2019)
+T2CMETHOD                        IAU2000B
+TIMEEPH                              FB90
+CORRECT_TROPOSPHERE                         N
+IPM                                     1
+PMELONG                               0.0
+PMELAT                                0.0
+PX                                    0.0
+ELAT            5.000000054057768 1 0.00000003851831738166
+ECL                              IERS2003
+ELONG           14.999999995883371 1 0.00000002304216637487
+PEPOCH             55000.0000000000000000
+F2                                    0.0
+F1              -9.999965405789203013e-16 1 2.0232262514790655615e-21
+F0              99.99999999999972139 1 5.967648440535254721e-14
+DM1                                 0.0 1
+DMEPOCH                         55000.0 0
+DM2                                 0.0 1

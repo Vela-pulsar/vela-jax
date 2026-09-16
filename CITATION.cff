@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+title: vela-jax
+message: >-
+  If you use this software, please cite the first Vela.jl paper
+  (Susobhanan 2025). vela-jax is a JAX translation of Vela.jl's
+  deterministic delay chain.
+type: software
+authors:
+  - family-names: van Haasteren
+    given-names: Rutger
+license: GPL-3.0-or-later
+repository-code: https://github.com/vhaasteren/vela-jax
+preferred-citation:
+  type: article
+  title: "Bayesian Pulsar Timing and Noise Analysis with Vela.jl: An Overview"
+  authors:
+    - family-names: Susobhanan
+      given-names: Abhimanyu
+  year: 2025
+  journal: The Astrophysical Journal
+  volume: "980"
+  issue: "2"
+  start: "165"
+  doi: 10.3847/1538-4357/adaaec
+  url: https://doi.org/10.3847/1538-4357/adaaec
+  identifiers:
+    - type: other
+      value: "arXiv:2412.15858"
