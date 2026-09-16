@@ -220,19 +220,63 @@ def test_a_false_bool_is_not_a_zero_delay():
 
 
 @pytest.mark.unit
-def test_uses_fbx_refuses_both_and_neither():
-    """PINT also refuses both at parse; this is the engine-side backup."""
+def test_uses_fbx_refuses_a_binary_par_with_neither_chart():
+    """The engine-side backstop. PINT refuses this first, at `validate`.
+
+    A stub, because a real PINT model cannot reach it: `check_required_params`
+    demands PB (or the FBX bridge) before this code runs. Everything the real
+    ingest path does is covered by the FBX test below -- which is the point:
+    this stub used to be the *only* FBX test, and it kept passing throughout
+    the outage that test records.
+    """
     from vela_jax.binary import uses_fbx
 
-    class _Param:
-        def __init__(self, quantity):
-            self.quantity = quantity
-
-    both = {"PB": _Param(1.0), "FB0": _Param(1.0)}
-    with pytest.raises(UnsupportedModelError, match="exactly one of PB and FB0"):
-        uses_fbx(both)
-    with pytest.raises(UnsupportedModelError, match="exactly one of PB and FB0"):
+    with pytest.raises(UnsupportedModelError, match="neither PB nor FB0"):
         uses_fbx({})
+
+
+def _fbx_twin(examples, tmp_path, name):
+    """`name`'s par with `PB` replaced by the equivalent `FB0`."""
+    text = (examples / f"{name}.par").read_text()
+    (pb_line,) = [line for line in text.splitlines() if line.startswith("PB ")]
+    fb0 = 1.0 / (float(pb_line.split()[1]) * 86400.0)
+    return _edited(examples, tmp_path, name, drop=("PB",), add=(f"FB0 {fb0!r}",))
+
+
+def test_fbx_is_read_from_fb0_not_from_a_pb_xor(examples, tmp_path):
+    """An FBX par builds, and agrees with its PB twin.
+
+    `PulsarBinary._canonicalize_fbx_views` installs `PB` as a `funcParameter`
+    view of `FB0` whenever any `FBn` is set, so "exactly one of PB and FB0 is
+    set" refused every FBX par on every family. Nothing caught it: no fixture
+    here uses the FBX chart, and the only `uses_fbx` test built a dict rather
+    than a PINT model.
+
+    Both charts describe the same orbit, so the residuals must agree to far
+    better than the engine's budget: measured 3.7e-14 s on a 3 us scale.
+    """
+    from pint.models.parameter import funcParameter
+
+    from vela_jax import Engine
+    from vela_jax.binary import uses_fbx
+
+    pb_engine = Engine.from_files(examples / "sim_dd.par", examples / "sim_dd.tim")
+    fbx_engine = Engine.from_files(
+        _fbx_twin(examples, tmp_path, "sim_dd"), examples / "sim_dd.tim"
+    )
+
+    # PINT's derived view is present and populated: the shape that broke the XOR.
+    model = fbx_engine.pint_model
+    assert isinstance(model["PB"], funcParameter)
+    assert model["PB"].quantity is not None
+    assert model["FB0"].quantity is not None
+
+    assert uses_fbx(model) is True
+    assert fbx_engine.chain.use_fbx is True
+    assert "binary.DD" in fbx_engine.stages
+
+    difference = np.abs(fbx_engine.residuals() - pb_engine.residuals())
+    assert difference.max() < 1e-12
 
 
 def test_the_zero_value_of_an_unconsumed_parameter_is_inert(examples, tmp_path):

@@ -55,17 +55,25 @@ def resolve_family(model) -> str:
 
 
 def uses_fbx(model) -> bool:
+    """Which orbital chart the par uses, *after* PINT's setup.
+
+    Read ``FB0`` first and treat ``PB`` only as the fallback. The obvious
+    spelling -- "exactly one of PB and FB0 is set" -- stopped being true:
+    ``PulsarBinary._canonicalize_fbx_views`` installs ``PB`` as a
+    ``funcParameter`` view of ``FB0`` whenever any ``FBn`` is set, so both
+    names carry a quantity and the XOR refused *every* FBX par, on all
+    families. pyvela's ``pint_components_to_vela`` reads it the same way.
+
+    The dropped half of the XOR was an engine-side backup only: PINT itself
+    refuses a par that sets both as ordinary parameters, before the view is
+    installed (``_setup_fbx_parameterization``).
+    """
     from ..freeze import has_value
 
-    has_pb = has_value(model, "PB")
-    has_fb0 = has_value(model, "FB0")
-    if has_pb == has_fb0:
-        raise UnsupportedModelError(
-            "a binary par that does not have exactly one of PB and FB0 "
-            f"(PB={'set' if has_pb else 'unset'}, "
-            f"FB0={'set' if has_fb0 else 'unset'})"
-        )
-    return has_fb0
+    use_fbx = has_value(model, "FB0")
+    if not use_fbx and not has_value(model, "PB"):
+        raise UnsupportedModelError("a binary par with neither PB nor FB0")
+    return use_fbx
 
 
 def binary_stage(family: str, *, use_fbx: bool, ecliptic: bool, ell1_t2: bool = False):
