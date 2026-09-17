@@ -289,14 +289,15 @@ def test_the_ecliptic_obliquity_comes_from_the_par(examples, tmp_path, ecl, arcs
     ``ECL IERS2003``, and that is ~100 ns RMS of Roemer delay away.
     """
     import numpy as np
+    from pint.models import get_model
 
-    from vela_jax import Engine
+    from vela_jax.constants import obliquity_radians
 
-    engine = Engine.from_files(
-        _edited(examples, tmp_path, ECLIPTIC, drop=("ECL",), add=(f"ECL {ecl}",)),
-        examples / f"{ECLIPTIC}.tim",
-    )
-    assert engine.obliquity == pytest.approx(
+    # ECL is a par keyword. Engine.from_files would ingest the TIM and download
+    # BIPM2023; pytest-xdist races that fetch on a cold cache.
+    par = _edited(examples, tmp_path, ECLIPTIC, drop=("ECL",), add=(f"ECL {ecl}",))
+    model = get_model(str(par))
+    assert obliquity_radians(model["ECL"].value) == pytest.approx(
         np.deg2rad(arcsec / 3600.0), rel=0, abs=1e-15
     )
 

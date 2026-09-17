@@ -6,6 +6,7 @@ The dispatch mirrors ``pyvela.model.pint_components_to_vela``; anything else
 
 from __future__ import annotations
 
+from ..constants import OBL
 from ..errors import UnsupportedModelError
 from .dd import binary_dd
 from .ell1 import binary_ell1
@@ -68,11 +69,21 @@ def uses_fbx(model) -> bool:
     return has_fb0
 
 
-def binary_stage(family: str, *, use_fbx: bool, ecliptic: bool, ell1_t2: bool = False):
+def binary_stage(
+    family: str,
+    *,
+    use_fbx: bool,
+    ecliptic: bool,
+    ell1_t2: bool = False,
+    obliquity: float | None = None,
+):
     """The stage callable for one family, with its static choices bound.
 
     ``ell1_t2`` is resolved here, at build time, into one of two closures --
     never a traced predicate, so the unused polynomial is not even evaluated.
+    ``obliquity`` is the same build-time value ``solar_system`` rotates the
+    line of sight with; DDK needs it to put Kopeikin ``I0``/``J0`` in the
+    model's sky frame. Unused for ELL1.
     """
     if family.startswith("ELL1"):
 
@@ -82,10 +93,17 @@ def binary_stage(family: str, *, use_fbx: bool, ecliptic: bool, ell1_t2: bool = 
             )
 
     else:
+        resolved = OBL if obliquity is None else obliquity
 
         def stage(frozen, corr, p):
             return binary_dd(
-                frozen, corr, p, family=family, use_fbx=use_fbx, ecliptic=ecliptic
+                frozen,
+                corr,
+                p,
+                family=family,
+                use_fbx=use_fbx,
+                ecliptic=ecliptic,
+                obliquity=resolved,
             )
 
     stage.__name__ = f"binary_{family}"

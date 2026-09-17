@@ -19,12 +19,12 @@ map in one place:
 |---|---|---|
 | `src/toa/toa.jl` (`TOACorrection`) | [`correction.py`](../src/vela_jax/correction.py) | `efac`/`equad2` fields dropped: noise is Discovery's |
 | `src/residuals/residuals.jl` | [`pipeline.py`](../src/vela_jax/pipeline.py) `form_residuals` | TZR is row `R−1` of the same arrays |
-| `src/model/solarsystem.jl` | [`astrometry.py`](../src/vela_jax/astrometry.py) | the `iszero(pm)` short-circuit is dropped; the formula already reduces |
+| `src/model/solarsystem.jl` | [`astrometry.py`](../src/vela_jax/astrometry.py) | the `iszero(pm)` short-circuit is dropped; `ecliptic_to_icrs` / `icrs_to_ecliptic` are `ecliptic_to_equatorial` / `equatorial_to_ecliptic` with the par's `ECL`, not Vela's hard-coded `OBL` |
 | `src/model/solarwind.jl` | [`solarwind.py`](../src/vela_jax/solarwind.py) | `SolarWindDispersion` only; `SolarWindDispersionX` refused |
 | `src/model/dispersion.jl`, `component.jl` | [`dispersion.py`](../src/vela_jax/dispersion.py) | plus the infinite-frequency guard, below |
 | `src/model/frequency_dependent.jl` | [`frequency_dependent.py`](../src/vela_jax/frequency_dependent.py) | barycentric frequency, as Vela |
 | `src/model/binary/orbit.jl` | [`binary/orbit.py`](../src/vela_jax/binary/orbit.py) | Mikkola with "substitute, then select" for the traced branches |
-| `binary_dd_base.jl`, `binary_dd.jl`, `binary_ddh.jl`, `binary_dds.jl`, `binary_ddk.jl` | [`binary/dd.py`](../src/vela_jax/binary/dd.py) | one `DDState`, `shapiro_params` dispatched at build |
+| `binary_dd_base.jl`, `binary_dd.jl`, `binary_ddh.jl`, `binary_dds.jl`, `binary_ddk.jl` | [`binary/dd.py`](../src/vela_jax/binary/dd.py) | one `DDState`, `shapiro_params` dispatched at build; ecliptic DDK rotates ICRS vectors into KOM's frame before `I0`/`J0` |
 | `binary_ell1_base.jl`, `binary_ell1.jl`, `binary_ell1h.jl`, `binary_ell1k.jl` | [`binary/ell1.py`](../src/vela_jax/binary/ell1.py) | the three polynomials transcribed term by term |
 | `src/model/spindown.jl` | [`spindown.py`](../src/vela_jax/spindown.py) | **changed**: the `F_`/`F0` Double64 split becomes a full build-time longdouble reduction |
 | `src/model/phase_offset.jl`, `src/model/jump.jl` | [`phase.py`](../src/vela_jax/phase.py) | JUMP × constant `F0`, as Vela |
@@ -222,6 +222,7 @@ ledger.
 | the nltiming protocols, by `isinstance` | vela-jax does not import nltiming, so nothing else would notice a drift | `test_nltiming_integration.py` |
 | `CLOCK` is respelled `CLK` for tempo2 | PINT's spelling silently un-pins tempo2's clock chain: 234 ns | `test_read_tempo2.py` |
 | the site velocity comes from tempo2's `siteVel` | `observatory_earth[3:6]` is zero, and the Roemer closure cannot see it | `test_read_tempo2.py` |
+| ecliptic DDK annual parallax is in KOM's frame | mixed ICRS/`KOM` is 2.2 μs on `sim_ddk.as_ECL()`; equatorial `sim_ddk` cannot see it | `test_ddk.py` |
 | a bare `-pn` flag is not a phase connection | tempo2 reads the flags only under `TRACK −2`; claiming otherwise advertises an authority it never exercised | `test_tempo2_gates.py` |
 
 ---
@@ -271,6 +272,7 @@ file skips cleanly without its optional dependency.
 | `test_precision.py` | 6 | §4: the epoch reduction, `phi_ref`, `spin_coeffs`, T13 |
 | `test_taylor.py` | 3 | the factorial convention, against PINT's own `taylor_horner` |
 | `test_orbit.py` | 4 | T6; Mikkola, its 2π-equivariance, its gradient at the singular inputs |
+| `test_ddk.py` | 4 | ecliptic DDK annual-parallax frame; ICRS vs `as_ECL()` on `sim_ddk` |
 | `test_perturbative.py` | 8 | T14, T15; the dual's identities, its Kepler solve, the assembly's validity domain |
 | `test_oracle_pyvela.py` | 3 | T4, T7, T12 — the Vela.jl oracle (`oracle` marker) |
 | `test_tcb.py` | 1 | the `UNITS` rules and the TCB→TDB transform |
