@@ -58,6 +58,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e '.[dev]'
+      # pytest-xdist workers race astropy's cache on a cold BIPM download.
+      - run: python -c "from pint.observatory.global_clock_corrections import get_clock_correction_file; get_clock_correction_file('tai2tt_bipm2023.clk'); get_clock_correction_file('gps2utc.clk')"
       - env:
           VELA_JAX_FIXTURES: ${{ github.workspace }}/Vela.jl/pyvela/examples
           JAX_ENABLE_X64: "1"
