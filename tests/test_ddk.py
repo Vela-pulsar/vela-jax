@@ -87,8 +87,8 @@ def _max_abs_mean_sub(a, b):
 
 def test_ddk_icrs_ecliptic_parity(examples):
     """PINT ``as_ECL()`` rotates coordinates and ``KOM``. After the frame fix,
-    residuals agree across that conversion at the nanosecond level. A mixed
-    ICRS/ecliptic annual term disagrees by ~2 μs on ``sim_ddk``.
+    residuals agree across that conversion at the ~10 ps to nanosecond level.
+    A mixed ICRS/ecliptic annual term disagrees by ~2 μs on ``sim_ddk``.
     """
     from pint.residuals import Residuals
 
@@ -104,7 +104,9 @@ def test_ddk_icrs_ecliptic_parity(examples):
 
     pint_icrs = Residuals(toas, model, subtract_mean=False).time_resids.to_value("s")
     pint_ecl = Residuals(toas, model_ecl, subtract_mean=False).time_resids.to_value("s")
-    assert _max_abs_mean_sub(pint_icrs, pint_ecl) < 1e-12
+    # Released PINT on GHA x64 is ~10 ps on sim_ddk; git PINT here is ~0.44 ps.
+    # The mixed-frame annual term is ~2 μs, so 100 ps still fails that by 20,000×.
+    assert _max_abs_mean_sub(pint_icrs, pint_ecl) < 1e-10
 
     ours_icrs = Engine.from_pint(_freeze(model), toas).residuals()
     ours_ecl = Engine.from_pint(_freeze(model_ecl), toas).residuals()
