@@ -64,6 +64,22 @@ def _freeze(model):
     return model
 
 
+def _zero_sky_uncertainties(model):
+    """Drop the σ that PINT ``as_ECL()`` tries to rotate.
+
+    Released PINT maps RA/DEC 1-σ errors as a signed fake-PM vector, so a
+    high-|Dec| pulsar can get a negative ELONG uncertainty and raise.
+    Residuals do not use those σ. nanograv/PINT#2036 rotates a diagonal
+    covariance instead; until that is on PyPI, zero the sky errors first.
+    """
+    model = deepcopy(model)
+    for name in ("RAJ", "DECJ", "PMRA", "PMDEC"):
+        param = model[name]
+        if param.uncertainty is not None:
+            param.uncertainty = 0 * param.units
+    return model
+
+
 def _max_abs_mean_sub(a, b):
     d = np.asarray(a) - np.asarray(b)
     return float(np.max(np.abs(d - d.mean())))
@@ -84,7 +100,7 @@ def test_ddk_icrs_ecliptic_parity(examples):
         pytest.skip("fixture sim_ddk not available")
 
     model, toas = load_pint(par, tim)
-    model_ecl = model.as_ECL()
+    model_ecl = _zero_sky_uncertainties(model).as_ECL()
 
     pint_icrs = Residuals(toas, model, subtract_mean=False).time_resids.to_value("s")
     pint_ecl = Residuals(toas, model_ecl, subtract_mean=False).time_resids.to_value("s")
